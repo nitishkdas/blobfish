@@ -62,6 +62,13 @@ func TestLoad(t *testing.T) {
 		{name: "bad log level", env: map[string]string{"BLOBFISH_LOG_LEVEL": "loud"}, wantErr: "log_level"},
 		{name: "bad log format", file: `{"log_format": "xml"}`, wantErr: "log_format"},
 		{name: "empty listen", file: `{"listen": ""}`, wantErr: "listen"},
+		{
+			name: "public url",
+			env:  map[string]string{"BLOBFISH_PUBLIC_URL": "https://files.example.com"},
+			want: func(c Config) Config { c.PublicURL = "https://files.example.com"; return c },
+		},
+		{name: "public url no scheme", file: `{"public_url": "files.example.com"}`, wantErr: "public_url"},
+		{name: "public url with path", file: `{"public_url": "https://x.com/sub"}`, wantErr: "public_url"},
 	}
 
 	for _, tt := range tests {

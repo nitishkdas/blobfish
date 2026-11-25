@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -29,6 +30,10 @@ type Config struct {
 	LogLevel string `json:"log_level"`
 	// LogFormat is "text" or "json".
 	LogFormat string `json:"log_format"`
+	// PublicURL is the base URL clients use to reach this server, e.g.
+	// "https://files.example.com". Used to build presigned URLs. When empty,
+	// the request's Host header is used.
+	PublicURL string `json:"public_url"`
 }
 
 // Default returns the built-in configuration.
@@ -104,6 +109,9 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	if v := getenv("BLOBFISH_LOG_FORMAT"); v != "" {
 		cfg.LogFormat = v
 	}
+	if v := getenv("BLOBFISH_PUBLIC_URL"); v != "" {
+		cfg.PublicURL = v
+	}
 	return nil
 }
 
@@ -125,6 +133,13 @@ func (c Config) Validate() error {
 	case "text", "json":
 	default:
 		return fmt.Errorf("config: log_format must be text or json, got %q", c.LogFormat)
+	}
+	if c.PublicURL != "" {
+		u, err := url.Parse(c.PublicURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+			(u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+			return fmt.Errorf("config: public_url must look like https://host[:port], got %q", c.PublicURL)
+		}
 	}
 	return nil
 }

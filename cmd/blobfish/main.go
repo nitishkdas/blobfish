@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nitishkdas/blobfish/internal/auth"
 	"github.com/nitishkdas/blobfish/internal/config"
 	"github.com/nitishkdas/blobfish/internal/engine"
 	"github.com/nitishkdas/blobfish/internal/server"
@@ -45,6 +46,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", getenv("BLOBFISH_CONFIG"), "path to JSON config file (env BLOBFISH_CONFIG)")
 	showVersion := fs.Bool("version", false, "print version and exit")
+	newAdminKey := fs.Bool("new-admin-key", false, "create a new *:admin API key, print it and exit (server must be stopped)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -70,6 +72,26 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	}
 	defer eng.Close()
 
+	authSvc := auth.NewService(eng, eng.PresignSecret())
+	if *newAdminKey {
+		token, rec, err := authSvc.CreateKey(ctx, "recovery-admin", []string{"*:admin"})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "Created admin key %s. Store it now; it is not shown again:\n%s\n", rec.ID, token)
+		return nil
+	}
+	token, err := authSvc.EnsureAdminKey(ctx)
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		// Printed directly, not logged: log pipelines tend to be kept and
+		// shipped around, and this secret should exist in one place only.
+		fmt.Fprintf(stderr, "\n  No API keys existed, so an admin key was created.\n"+
+			"  It is shown only this once. Store it somewhere safe:\n\n    %s\n\n", token)
+	}
+
 	janitorCtx, stopJanitor := context.WithCancel(context.Background())
 	var janitor sync.WaitGroup
 	janitor.Go(func() { eng.JanitorLoop(janitorCtx, janitorInterval) })
@@ -83,7 +105,14 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	}
 
 	srv := &http.Server{
-		Handler: server.New(server.Options{Logger: log, MaxObjectSize: cfg.MaxObjectSize}),
+		Handler: server.New(server.Options{
+			Logger:        log,
+			MaxObjectSize: cfg.MaxObjectSize,
+			Store:         eng,
+			Buckets:       eng,
+			Auth:          authSvc,
+			PublicURL:     cfg.PublicURL,
+		}),
 		// Only the header read is bounded. Bodies can be multi-GB streams on
 		// slow links, so there is deliberately no ReadTimeout/WriteTimeout.
 		ReadHeaderTimeout: 10 * time.Second,

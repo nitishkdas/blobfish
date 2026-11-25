@@ -188,7 +188,7 @@ func TestNewRequestID(t *testing.T) {
 	if a[:10] == "0000000000" {
 		t.Errorf("timestamp part is empty: %s", a)
 	}
-	if newRequestID(t0) == newRequestID(t0) {
+	if c, d := newRequestID(t0), newRequestID(t0); c == d {
 		t.Error("two ids in the same millisecond collided")
 	}
 }

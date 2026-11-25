@@ -3,7 +3,8 @@
 //
 // Layout under the data dir:
 //
-//	meta.db              bbolt: "buckets", "objects/<bucket>/<key>", "blobs/<id>"
+//	meta.db              bbolt: "buckets", "objects/<bucket>/<key>", "blobs/<id>",
+//	                     "keys/<token hash>", "settings"
 //	objects/ab/cd/<id>   object bytes, random 32-hex-char IDs
 //	tmp/                 uploads in progress
 //
@@ -18,6 +19,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -62,6 +64,7 @@ type Engine struct {
 	db                  *bbolt.DB
 	log                 *slog.Logger
 	now                 func() time.Time
+	presignSecret       []byte
 
 	// inflight holds names of tmp files and blob IDs that a running Put owns
 	// but has not committed yet. The janitor skips them.
@@ -125,11 +128,21 @@ func Open(dir string, opts Options) (*Engine, error) {
 		return nil, fmt.Errorf("open meta.db (is another blobfish using %s?): %w", dir, err)
 	}
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs} {
+		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
 		}
+		settings := tx.Bucket(bktSettings)
+		secret := settings.Get(setPresign)
+		if secret == nil {
+			secret = make([]byte, 32)
+			rand.Read(secret)
+			if err := settings.Put(setPresign, secret); err != nil {
+				return err
+			}
+		}
+		e.presignSecret = bytes.Clone(secret) // bbolt memory is only valid inside the tx
 		return nil
 	})
 	if err != nil {

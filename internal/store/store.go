@@ -37,6 +37,28 @@ type Buckets interface {
 	ListBuckets(ctx context.Context) ([]BucketInfo, error)
 }
 
+// Keys persists API key records. Only the SHA-256 hash of a token is ever
+// stored; the token itself is shown to its creator once and then forgotten.
+type Keys interface {
+	CreateKey(ctx context.Context, rec KeyRecord) error
+	// KeyByHash returns ErrNoSuchAPIKey if no key has this token hash.
+	KeyByHash(ctx context.Context, hash string) (KeyRecord, error)
+	// ListKeys returns all keys, oldest first.
+	ListKeys(ctx context.Context) ([]KeyRecord, error)
+	// DeleteKey returns ErrNoSuchAPIKey if id is unknown.
+	DeleteKey(ctx context.Context, id string) error
+}
+
+// KeyRecord is a stored API key.
+type KeyRecord struct {
+	ID      string    `json:"id"`
+	Name    string    `json:"name"`
+	Scopes  []string  `json:"scopes"`
+	Created time.Time `json:"created"`
+	// Hash is the lowercase hex SHA-256 of the token.
+	Hash string `json:"hash"`
+}
+
 // Meta is the caller-supplied metadata stored with an object.
 type Meta struct {
 	// ContentType defaults to application/octet-stream when empty.
@@ -107,4 +129,5 @@ var (
 	ErrInvalidCursor     = errors.New("invalid list cursor")
 	ErrMetadataTooLarge  = errors.New("user metadata too large")
 	ErrDataCorrupt       = errors.New("stored data failed integrity check")
+	ErrNoSuchAPIKey      = errors.New("API key not found")
 )

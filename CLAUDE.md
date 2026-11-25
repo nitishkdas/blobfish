@@ -10,7 +10,7 @@ BlobFish is a minimal, single-node, open-source object store written in Go. It s
 
 - Working title was "tinys3". The name is now **BlobFish**, command `blobfish`.
 - License: **Apache 2.0**. Fully open source: no paid edition, no closed features.
-- Status: planning done, implementation starting (milestone 1: skeleton).
+- Status: milestones 1, 2 and 4 done (skeleton, storage engine, /v1 API + auth). Power-cut gate test still open. Next: web UI and hardening.
 
 ## Why it exists
 
@@ -98,7 +98,7 @@ All endpoints under `/v1`, `Authorization: Bearer <key>`, JSON for everything ex
 | GET | `/healthz` | Health check, no auth |
 
 - **API keys**: random 32-byte tokens, only SHA-256 hash stored. Scopes like `invoices:rw`, `*:admin`.
-- **Presigned URLs**: query params `exp` + `sig`, where `sig = HMAC-SHA256(server_secret, method + bucket + key + exp)`. Server checks signature and expiry, no key needed.
+- **Presigned URLs**: query params `exp` + `sig`, where `sig = hex(HMAC-SHA256(server_secret, method NUL bucket NUL key NUL exp NUL))`. NUL separators keep it unambiguous (keys may contain anything but NUL). HEAD may use a GET signature. Max expiry 7 days. Server checks signature, then expiry; no key needed. The secret is generated once and stored in `meta.db` `settings`.
 - **Errors**: one shape everywhere, stable codes:
   ```json
   { "error": { "code": "NoSuchKey", "message": "object not found", "requestId": "01J..." } }
@@ -136,7 +136,11 @@ CI (`.github/workflows/ci.yml`) runs gofmt, vet, race tests, then builds linux a
 
 - `cmd/blobfish` – thin `main`; `run()` holds the logic so it is testable (flags, config, listener, graceful shutdown on SIGTERM).
 - `internal/config` – defaults → JSON file (`-config` / `BLOBFISH_CONFIG`, unknown fields rejected) → `BLOBFISH_*` env. `Load` takes `getenv` explicitly.
-- `internal/server` – router (`net/http` patterns), middleware chain (request ID → access log → recover → body limit), and the one JSON error writer plus stable error codes in `errors.go`. New error codes go there.
+- `internal/server` – router, middleware chain (request ID → access log → recover → body limit), and the `/v1` handlers. `errors.go` holds the stable error codes and the `errorMapping` table: the one place internal errors become API codes. Add new sentinel errors there.
+  - `/v1/b/...` object routes deliberately bypass `ServeMux` (it would clean/redirect keys like `a//b`); `api.objects` splits bucket/key from the raw decoded path.
+  - Every handler calls `a.authorize(...)` before touching the store, so a 403 never reveals whether a bucket/key exists.
+  - A checksum failure discovered mid-download panics with `http.ErrAbortHandler` to cut the connection (headers are already sent).
+- `internal/auth` – `Authenticator` interface (SigV4 can plug in later) and `Service`: bearer tokens (`bf_` + 32 random bytes, only SHA-256 stored via `store.Keys`), scopes `bucket:r|w|rw|admin` / `*:...`, presign/verify. `Principal.Can(perm, bucket, key)`; server-wide ops use bucket `"*"`, which only `*:` scopes match. Refuses deleting the last `*:admin` key. First start with no keys prints a bootstrap admin key to stderr once; `blobfish -new-admin-key` mints another offline.
 - `internal/store` – `Store`/`Buckets` interfaces, value types, sentinel errors (`ErrNoSuchKey`, …), name/key/range validation. Frontends import only this.
 - `internal/engine` – the implementation. bbolt buckets: `buckets` (name→record), `objects/<bucket>` (nested; key→JSON record with blob ID), `blobs` (index of committed blob IDs). A blob file not in `blobs` is an orphan; the janitor deletes it (at `Open` and hourly). Running Puts register tmp names/blob IDs in `inflight` so the janitor skips them; keep "track before rename, untrack after commit".
 - Crash tests: `e.crash` hook stops a write dead at named points (`put:written|synced|renamed|committed`, `delete:committed`); `TestCrashPoints` reopens and checks old-or-new + no orphans. `TestKill9DuringWrites` SIGKILLs a child process (`TestCrashChild`) mid-write; skipped with `-short`. New write-path steps need a new crash point and table row.
