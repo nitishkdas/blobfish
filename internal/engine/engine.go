@@ -129,6 +129,12 @@ func Open(dir string, opts Options) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open meta.db (is another blobfish using %s?): %w", dir, err)
 	}
+	// Refuse data from a newer binary before writing anything to it.
+	if err := checkFormat(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	var formatBefore int
 	err = db.Update(func(tx *bbolt.Tx) error {
 		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
@@ -145,13 +151,17 @@ func Open(dir string, opts Options) (*Engine, error) {
 			}
 		}
 		e.presignSecret = bytes.Clone(secret) // bbolt memory is only valid inside the tx
-		return nil
+		formatBefore, err = upgradeFormat(tx, FormatVersion, migrationSteps())
+		return err
 	})
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("init meta.db: %w", err)
 	}
 	e.db = db
+	if formatBefore != 0 && formatBefore != FormatVersion {
+		log.Info("upgraded data format", "from", formatBefore, "to", FormatVersion)
+	}
 
 	stats, err := e.RunJanitor(context.Background())
 	if err != nil {
