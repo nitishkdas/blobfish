@@ -20,8 +20,10 @@ curl localhost:8080/healthz     # {"status":"ok"}
 ```
 
 On first start, with no API keys yet, BlobFish creates an admin key and
-prints it to stderr **once**. Lost it? Stop the server and run
-`./blobfish -new-admin-key` to mint another.
+saves it to `data/initial-admin-key`, a file only the BlobFish user can read
+(it is also shown if you started BlobFish in a terminal). It is never written
+to the log. Copy it somewhere safe and delete the file. Lost it? Stop the
+server and run `./blobfish -new-admin-key` to mint another.
 
 ## Web UI
 

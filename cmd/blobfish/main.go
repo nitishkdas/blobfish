@@ -89,15 +89,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		fmt.Fprintf(stdout, "Created admin key %s. Store it now; it is not shown again:\n%s\n", rec.ID, token)
 		return nil
 	}
-	token, err := authSvc.EnsureAdminKey(ctx)
-	if err != nil {
+	if err := bootstrapAdminKey(ctx, authSvc, cfg.DataDir, log, stderr); err != nil {
 		return err
-	}
-	if token != "" {
-		// Printed directly, not logged: log pipelines tend to be kept and
-		// shipped around, and this secret should exist in one place only.
-		fmt.Fprintf(stderr, "\n  No API keys existed, so an admin key was created.\n"+
-			"  It is shown only this once. Store it somewhere safe:\n\n    %s\n\n", token)
 	}
 
 	janitorCtx, stopJanitor := context.WithCancel(context.Background())

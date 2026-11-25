@@ -129,6 +129,11 @@ type harness struct {
 	stats struct {
 		acked, landed, rolledBack int
 	}
+	// unexpected counts responses that were neither success nor caused by
+	// the cut (e.g. 507 or 500 during normal running). Any of them fails
+	// the run: the test must exercise real writes, not refusals.
+	unexpectedMu sync.Mutex
+	unexpected   map[int]int
 }
 
 func (h *harness) run() error {
@@ -177,6 +182,13 @@ func (h *harness) run() error {
 		}
 		if err := h.startBlobfish(); err != nil {
 			return fmt.Errorf("round %d: restart after cut: %w", round, err)
+		}
+
+		h.unexpectedMu.Lock()
+		bad := fmt.Sprint(h.unexpected)
+		h.unexpectedMu.Unlock()
+		if bad != "map[]" {
+			return fmt.Errorf("round %d: requests failed with unexpected statuses before the cut (status:count) %s; see /tmp/blobfish-*.log", round, bad)
 		}
 
 		pendingBefore := h.countPending()
@@ -377,10 +389,16 @@ func (h *harness) startBlobfish() error {
 		return fmt.Errorf("%w (see %s)", err, logPath)
 	}
 	if h.token == "" {
+		// The first start writes the admin key to <data dir>/initial-admin-key
+		// (older builds printed it; accept either).
 		select {
 		case h.token = <-tokenCh:
-		case <-time.After(5 * time.Second):
-			return errors.New("blobfish printed no bootstrap admin key")
+		case <-time.After(500 * time.Millisecond):
+			b, err := os.ReadFile(filepath.Join(h.cfg.mountDir, "data", "initial-admin-key"))
+			if err != nil {
+				return fmt.Errorf("no bootstrap admin key printed or saved: %w", err)
+			}
+			h.token = strings.TrimSpace(string(b))
 		}
 	}
 	return nil
@@ -456,6 +474,9 @@ func (h *harness) oneOp(rng *rand.Rand, k *keyLedger) bool {
 			k.acked, k.pending = next, nil
 			return true
 		}
+		if err == nil {
+			h.noteUnexpected(resp.StatusCode)
+		}
 		return false
 	}
 
@@ -476,7 +497,19 @@ func (h *harness) oneOp(rng *rand.Rand, k *keyLedger) bool {
 		k.acked, k.pending = next, nil
 		return true
 	}
+	if err == nil {
+		h.noteUnexpected(resp.StatusCode)
+	}
 	return false
+}
+
+func (h *harness) noteUnexpected(status int) {
+	h.unexpectedMu.Lock()
+	defer h.unexpectedMu.Unlock()
+	if h.unexpected == nil {
+		h.unexpected = map[int]int{}
+	}
+	h.unexpected[status]++
 }
 
 func (h *harness) objectURL(key string) string {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,4 +133,92 @@ func TestBackupAndRestoreCommands(t *testing.T) {
 	if err := run(ctx, []string{"backup"}, env, &stdout, &stderr); err == nil {
 		t.Error("backup without -o succeeded")
 	}
+}
+
+func TestBootstrapKeyGoesToFileNotLog(t *testing.T) {
+	addr := freeAddr(t)
+	dataDir := filepath.Join(t.TempDir(), "data")
+	env := map[string]string{"BLOBFISH_LISTEN": addr, "BLOBFISH_DATA_DIR": dataDir}
+	getenv := func(k string) string { return env[k] }
+
+	for start := 1; start <= 2; start++ {
+		var stderr lockedBuf
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- run(ctx, nil, getenv, &bytes.Buffer{}, &stderr) }()
+		waitHealthy(t, addr, done)
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		logs := stderr.String()
+		if strings.Contains(logs, "bf_") {
+			t.Fatalf("start %d: the admin key appeared in the log output:\n%s", start, logs)
+		}
+		path := filepath.Join(dataDir, "initial-admin-key")
+		st, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("start %d: key file: %v", start, err)
+		}
+		if st.Mode().Perm() != 0o600 {
+			t.Errorf("key file mode %v, want 0600", st.Mode().Perm())
+		}
+		switch start {
+		case 1:
+			if !strings.Contains(logs, "admin key was created") || !strings.Contains(logs, path) {
+				t.Errorf("first start should say where the key is:\n%s", logs)
+			}
+		case 2:
+			if !strings.Contains(logs, "still on disk") {
+				t.Errorf("second start should remind to delete the file:\n%s", logs)
+			}
+		}
+	}
+	// The saved key really is an admin key.
+	key, _ := os.ReadFile(filepath.Join(dataDir, "initial-admin-key"))
+	eng, err := engine.Open(dataDir, engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	keys, _ := eng.ListKeys(context.Background())
+	if len(keys) != 1 || keys[0].Scopes[0] != "*:admin" || !strings.HasPrefix(strings.TrimSpace(string(key)), "bf_") {
+		t.Errorf("keys = %+v, file = %q", keys, key)
+	}
+}
+
+// lockedBuf is a bytes.Buffer safe for the server's goroutines.
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+func waitHealthy(t *testing.T, addr string, done chan error) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			t.Fatalf("run exited early: %v", err)
+		default:
+		}
+		if resp, err := http.Get("http://" + addr + "/healthz"); err == nil {
+			resp.Body.Close()
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("server never came up")
 }

@@ -107,3 +107,20 @@ func TestDiskFreeReal(t *testing.T) {
 		t.Fatalf("diskFree = %d, %v", free, err)
 	}
 }
+
+func TestFreeFromStatfs(t *testing.T) {
+	if free, err := freeFromStatfs(1000, 250, 4096); err != nil || free != 250*4096 {
+		t.Errorf("normal fs: %d, %v", free, err)
+	}
+	// LazyFS and some network file systems report zero capacity: that is
+	// "unknown", and must not block uploads as if the disk were full.
+	if _, err := freeFromStatfs(0, 0, 0); !errors.Is(err, errCapacityUnknown) {
+		t.Errorf("zero-capacity fs: %v", err)
+	}
+	e, _ := newEngine(t)
+	e.minFree = 100 * mib
+	e.freeSpace = func() (uint64, error) { return freeFromStatfs(0, 0, 4096) }
+	if err := e.checkSpace(10 * mib); err != nil {
+		t.Errorf("upload refused on a fs that reports no capacity: %v", err)
+	}
+}

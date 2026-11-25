@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -59,4 +60,16 @@ func human(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// errCapacityUnknown: the file system reports a total size of zero, which
+// some FUSE and network file systems do. Their free space is unknown, not
+// zero; treating it as zero would refuse every upload.
+var errCapacityUnknown = errors.New("file system does not report its capacity; free-space reserve not enforced")
+
+func freeFromStatfs(blocks, avail, bsize uint64) (uint64, error) {
+	if blocks == 0 {
+		return 0, errCapacityUnknown
+	}
+	return avail * bsize, nil
 }
