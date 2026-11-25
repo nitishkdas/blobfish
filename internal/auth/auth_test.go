@@ -311,3 +311,15 @@ func TestKeyLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestScopeStringRoundTrip(t *testing.T) {
+	for _, in := range []string{"invoices:r", "invoices:w", "invoices:rw", "invoices:admin", "*:admin", "*:rw"} {
+		sc, err := ParseScope(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := sc.String(); got != in {
+			t.Errorf("ParseScope(%q).String() = %q", in, got)
+		}
+	}
+}

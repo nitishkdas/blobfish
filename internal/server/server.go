@@ -33,6 +33,7 @@ type api struct {
 	buckets   store.Buckets
 	auth      *auth.Service
 	publicURL string
+	maxObject int64
 }
 
 // New returns the root handler with all routes and middleware applied.
@@ -43,10 +44,12 @@ func New(opts Options) http.Handler {
 		buckets:   opts.Buckets,
 		auth:      opts.Auth,
 		publicURL: strings.TrimSuffix(opts.PublicURL, "/"),
+		maxObject: opts.MaxObjectSize,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
+	mux.HandleFunc("GET /v1/whoami", a.whoami)
 	mux.HandleFunc("GET /v1/buckets", a.listBuckets)
 	mux.HandleFunc("PUT /v1/buckets/{bucket}", a.createBucket)
 	mux.HandleFunc("DELETE /v1/buckets/{bucket}", a.deleteBucket)

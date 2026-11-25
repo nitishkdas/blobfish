@@ -86,6 +86,24 @@ func ParseScope(s string) (Scope, error) {
 	return Scope{Bucket: bucket, Perm: perm}, nil
 }
 
+// String formats s the way ParseScope reads it, e.g. "invoices:rw".
+func (s Scope) String() string {
+	var p string
+	switch {
+	case s.Perm&PermAdmin != 0:
+		p = "admin"
+	case s.Perm == PermRead|PermWrite:
+		p = "rw"
+	case s.Perm == PermRead:
+		p = "r"
+	case s.Perm == PermWrite:
+		p = "w"
+	default:
+		p = fmt.Sprintf("perm(%d)", s.Perm)
+	}
+	return s.Bucket + ":" + p
+}
+
 // Target is what a request acts on. Bucket is "*" for server-wide
 // operations; Key is empty for bucket-level ones.
 type Target struct {
@@ -94,9 +112,11 @@ type Target struct {
 
 // Principal is an authenticated caller.
 type Principal struct {
-	// KeyID is the API key's ID, or empty for a presigned URL.
-	KeyID  string
-	Scopes []Scope
+	// KeyID and KeyName identify the API key; both are empty for a
+	// presigned URL.
+	KeyID   string
+	KeyName string
+	Scopes  []Scope
 	// presigned limits the principal to exactly one object.
 	presigned *Target
 }
@@ -166,7 +186,7 @@ func (s *Service) authenticateToken(ctx context.Context, token string) (Principa
 	if err != nil {
 		return Principal{}, fmt.Errorf("look up API key: %w", err)
 	}
-	p := Principal{KeyID: rec.ID}
+	p := Principal{KeyID: rec.ID, KeyName: rec.Name}
 	for _, raw := range rec.Scopes {
 		sc, err := ParseScope(raw)
 		if err != nil {

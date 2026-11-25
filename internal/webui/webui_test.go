@@ -17,7 +17,7 @@ func TestServesAssetsWithSecurityHeaders(t *testing.T) {
 		contains string
 	}{
 		{"/ui/", "text/html", `<div id="app"`},
-		{"/ui/app.js", "text/javascript", "function renderLogin"},
+		{"/ui/js/app.js", "text/javascript", "function renderLogin"},
 		{"/ui/style.css", "text/css", "--accent"},
 		{"/ui/favicon.svg", "image/svg+xml", "<svg"},
 	}

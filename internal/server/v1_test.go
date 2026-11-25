@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -571,4 +572,41 @@ func TestFaviconRoute(t *testing.T) {
 	if rr := a.must(http.StatusOK, "GET", "/favicon.ico", "", nil); rr.Header().Get("Content-Type") != "image/svg+xml" {
 		t.Errorf("Content-Type = %q", rr.Header().Get("Content-Type"))
 	}
+}
+
+func TestWhoami(t *testing.T) {
+	a := newTestAPI(t)
+	app := a.key("bucket1:rw", "shared:r")
+	tests := []struct {
+		name       string
+		token      string
+		want       int
+		wantName   string
+		wantScopes []string
+	}{
+		{"admin", a.admin, 200, "bootstrap-admin", []string{"*:admin"}},
+		{"app key", app, 200, "test", []string{"bucket1:rw", "shared:r"}},
+		{"no key", "", 401, "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := a.must(tt.want, "GET", "/v1/whoami", tt.token, nil)
+			if tt.want != 200 {
+				return
+			}
+			var got whoamiResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Name != tt.wantName || !slices.Equal(got.Scopes, tt.wantScopes) ||
+				got.MaxObjectSize != 1<<20 || got.KeyID == "" {
+				t.Errorf("whoami = %+v", got)
+			}
+			if strings.Contains(rr.Body.String(), "bf_") || strings.Contains(rr.Body.String(), "hash") {
+				t.Errorf("whoami leaks a secret: %s", rr.Body)
+			}
+		})
+	}
+	// A presigned URL is not a key and cannot ask who it is.
+	a.must(http.StatusUnauthorized, "GET", "/v1/whoami?exp=9999999999&sig=00", "", nil)
 }

@@ -1,0 +1,97 @@
+// Talking to the /v1 API, and keeping the API key for this browser.
+
+import { toast } from "./dom.js";
+
+const KEY_STORE = "blobfish.key";
+
+// session.key is the key in use. onUnauthorized runs when the server
+// rejects it (revoked, or the data dir was reset).
+export const session = { key: null, onUnauthorized: () => {} };
+
+export class ApiError extends Error {
+  constructor(status, code, message, requestId) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+  }
+}
+
+async function parseError(res) {
+  let e = {};
+  try { e = (await res.json()).error || {}; } catch { /* not JSON */ }
+  return new ApiError(res.status, e.code || `HTTP${res.status}`, e.message || res.statusText, e.requestId);
+}
+
+export async function api(method, path, { body, key = session.key } = {}) {
+  const headers = { Authorization: `Bearer ${key}` };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!res.ok) {
+    const err = await parseError(res);
+    if (res.status === 401 && key === session.key) session.onUnauthorized();
+    throw err;
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+// objectExists reports true, false, or null when it can't tell (for
+// example a write-only key may not read).
+export async function objectExists(bucket, key) {
+  try {
+    const res = await fetch(objectPath(bucket, key), { method: "HEAD", headers: { Authorization: `Bearer ${session.key}` } });
+    if (res.status === 200) return true;
+    if (res.status === 404) return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Object keys may contain any character, so each path segment is encoded.
+// Browsers normalize "." and ".." segments before sending, so keys with
+// such segments can only be reached through the API with a raw client.
+export function objectPath(bucket, key) {
+  return `/v1/b/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+export function bucketPath(bucket) {
+  return `/v1/b/${encodeURIComponent(bucket)}`;
+}
+
+export function presign(bucket, key, method, expiresIn) {
+  return api("POST", "/v1/presign", { body: { bucket, key, method, expiresIn } });
+}
+
+export function showError(err) {
+  if (err instanceof ApiError) {
+    toast(err.message, { error: true, detail: `${err.code}${err.requestId ? " · " + err.requestId : ""}` });
+  } else {
+    toast(String(err.message || err), { error: true });
+  }
+}
+
+// ---------- Key storage ----------
+// Storage can throw (private mode, blocked site data); the UI still works,
+// the user just signs in again next time.
+
+export function loadKey() {
+  try { return sessionStorage.getItem(KEY_STORE) || localStorage.getItem(KEY_STORE); } catch { return null; }
+}
+export function saveKey(key, remember) {
+  try {
+    sessionStorage.setItem(KEY_STORE, key);
+    if (remember) localStorage.setItem(KEY_STORE, key);
+  } catch { /* in-memory only */ }
+}
+export function forgetKey() {
+  try { sessionStorage.removeItem(KEY_STORE); localStorage.removeItem(KEY_STORE); } catch { /* ignore */ }
+}
+
+// Small per-browser preferences (not secrets).
+export function loadPref(name, fallback) {
+  try { return localStorage.getItem(`blobfish.pref.${name}`) ?? fallback; } catch { return fallback; }
+}
+export function savePref(name, value) {
+  try { localStorage.setItem(`blobfish.pref.${name}`, value); } catch { /* ignore */ }
+}

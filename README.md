@@ -26,8 +26,12 @@ prints it to stderr **once**. Lost it? Stop the server and run
 ## Web UI
 
 Open `http://localhost:8080/` and sign in with an API key. You can browse
-buckets and folders, upload by button or drag and drop, download, delete,
-and make share links that expire (1 hour to 7 days).
+buckets and folders page by page, open files in the browser, see details
+(including the SHA-256 checksum), upload files or whole folders (by button
+or drag and drop, with a prompt before overwriting), download, delete, and
+make share links that expire (1 hour to 7 days). Admin keys also get an
+API keys page to create and revoke keys scoped to buckets. Buttons a key
+isn't allowed to use are hidden.
 
 ## Using the API
 

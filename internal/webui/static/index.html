@@ -7,7 +7,7 @@
   <title>BlobFish</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
-  <script type="module" src="app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </head>
 <body>
   <div id="app" class="boot">Loading…</div>
@@ -33,14 +33,24 @@
       </div>
     </form>
   </dialog>
-  <dialog id="confirm">
+  <!-- One dialog for confirm / choice / prompt; filled by ask() in js/dom.js. -->
+  <dialog id="ask">
     <form method="dialog" class="dialog">
-      <h2 id="confirm-title"></h2>
-      <div id="confirm-body" class="confirm-body"></div>
-      <div class="row end">
-        <button value="cancel" id="confirm-cancel">Cancel</button>
-        <button value="ok" id="confirm-ok" class="danger-solid">Delete</button>
-      </div>
+      <h2 id="ask-title"></h2>
+      <div id="ask-body" class="confirm-body"></div>
+      <label id="ask-field" class="field" hidden>
+        <span id="ask-label"></span>
+        <input id="ask-input" autocomplete="off" spellcheck="false">
+      </label>
+      <p id="ask-error" class="hint" role="alert"></p>
+      <div id="ask-actions" class="row end wrap"></div>
+    </form>
+  </dialog>
+  <dialog id="details">
+    <form method="dialog" class="dialog">
+      <h2 id="details-title" class="break"></h2>
+      <div id="details-body"></div>
+      <div id="details-actions" class="row end wrap"></div>
     </form>
   </dialog>
   <dialog id="new-key">

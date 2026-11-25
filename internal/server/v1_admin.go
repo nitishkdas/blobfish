@@ -81,6 +81,31 @@ func (a *api) listBuckets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string][]bucketJSON{"buckets": out})
 }
 
+type whoamiResponse struct {
+	KeyID         string   `json:"keyId"`
+	Name          string   `json:"name"`
+	Scopes        []string `json:"scopes"`
+	MaxObjectSize int64    `json:"maxObjectSize"`
+}
+
+// whoami tells a client which key it is using and what that key may do,
+// so the web UI can hide actions that would only end in a 403. It reveals
+// nothing the caller couldn't learn by trying, and never the token.
+func (a *api) whoami(w http.ResponseWriter, r *http.Request) {
+	p, err := a.auth.Authenticate(r, auth.Target{})
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	scopes := make([]string, 0, len(p.Scopes))
+	for _, s := range p.Scopes {
+		scopes = append(scopes, s.String())
+	}
+	writeJSON(w, http.StatusOK, whoamiResponse{
+		KeyID: p.KeyID, Name: p.KeyName, Scopes: scopes, MaxObjectSize: a.maxObject,
+	})
+}
+
 type presignRequest struct {
 	Bucket    string `json:"bucket"`
 	Key       string `json:"key"`
