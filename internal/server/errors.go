@@ -121,6 +121,9 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 	if status == http.StatusUnauthorized {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="blobfish"`)
 	}
+	if f := logFieldsFrom(r); f != nil {
+		f.errCode = code
+	}
 	writeJSON(w, status, errorBody{Error: errorDetail{
 		Code:      code,
 		Message:   message,

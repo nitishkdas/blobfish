@@ -192,3 +192,42 @@ func TestNewRequestID(t *testing.T) {
 		t.Error("two ids in the same millisecond collided")
 	}
 }
+
+func TestAccessLogIncludesErrorCode(t *testing.T) {
+	h, logs := newTestHandler(t, 10, map[string]http.HandlerFunc{
+		"GET /ok":      func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) },
+		"GET /missing": handleNotFound,
+		"GET /boom":    func(http.ResponseWriter, *http.Request) { panic("x") },
+		"PUT /up":      func(w http.ResponseWriter, r *http.Request) { io.Copy(io.Discard, r.Body) },
+	})
+	tests := []struct {
+		method, path, body string
+		wantCode           string // "" means no code attribute
+	}{
+		{"GET", "/ok", "", ""},
+		{"GET", "/missing", "", CodeNotFound},
+		{"GET", "/boom", "", CodeInternalError},
+		{"PUT", "/up", "this body is too long", CodeEntityTooLarge},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			logs.Reset()
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body)))
+			var line struct {
+				Msg  string `json:"msg"`
+				Code string `json:"code"`
+			}
+			for _, l := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				if json.Unmarshal([]byte(l), &line) == nil && line.Msg == "request" {
+					break
+				}
+			}
+			if line.Msg != "request" {
+				t.Fatalf("no access log line in:\n%s", logs)
+			}
+			if line.Code != tt.wantCode {
+				t.Errorf("logged code = %q, want %q", line.Code, tt.wantCode)
+			}
+		})
+	}
+}

@@ -9,7 +9,10 @@ import (
 
 type ctxKey int
 
-const requestIDKey ctxKey = iota
+const (
+	requestIDKey ctxKey = iota
+	logFieldsKey
+)
 
 // RequestID returns the request ID stored in ctx, or "" if there is none.
 func RequestID(ctx context.Context) string {

@@ -20,6 +20,24 @@ const Prefix = "/ui/"
 const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
 	"connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
+// Favicon serves the BlobFish icon at /favicon.ico. Browsers ask for that
+// path on their own when a file is opened straight from the server (for
+// example a share link), which otherwise fills the log with 404s.
+func Favicon() http.Handler {
+	icon, err := files.ReadFile("static/favicon.svg")
+	if err != nil {
+		panic(err) // embedded at build time
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", "image/svg+xml")
+		h.Set("Cache-Control", "public, max-age=86400")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Content-Security-Policy", "default-src 'none'")
+		w.Write(icon)
+	})
+}
+
 // Handler serves the UI under Prefix.
 func Handler() http.Handler {
 	static, err := fs.Sub(files, "static")

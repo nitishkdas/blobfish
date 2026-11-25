@@ -565,3 +565,10 @@ func TestClientHangUpIsNotServerError(t *testing.T) {
 		})
 	}
 }
+
+func TestFaviconRoute(t *testing.T) {
+	a := newTestAPI(t)
+	if rr := a.must(http.StatusOK, "GET", "/favicon.ico", "", nil); rr.Header().Get("Content-Type") != "image/svg+xml" {
+		t.Errorf("Content-Type = %q", rr.Header().Get("Content-Type"))
+	}
+}

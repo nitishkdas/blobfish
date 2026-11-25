@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -64,25 +65,43 @@ func recoverMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// logMiddleware writes one access-log line per request.
+// logFields carries values from deep in a handler back to the access log.
+type logFields struct {
+	errCode string // API error code, set by writeError
+}
+
+func logFieldsFrom(r *http.Request) *logFields {
+	f, _ := r.Context().Value(logFieldsKey).(*logFields)
+	return f
+}
+
+// logMiddleware writes one access-log line per request. Failed requests
+// also log their API error code, so "status=400" says which 400.
 func logMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			rec := &statusRecorder{ResponseWriter: w}
-			next.ServeHTTP(rec, r)
+			fields := &logFields{}
+			next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), logFieldsKey, fields)))
 			status := rec.status
 			if status == 0 {
 				status = http.StatusOK
 			}
-			log.InfoContext(r.Context(), "request",
+			attrs := []any{
 				"request_id", RequestID(r.Context()),
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", status,
+			}
+			if fields.errCode != "" {
+				attrs = append(attrs, "code", fields.errCode)
+			}
+			attrs = append(attrs,
 				"bytes", rec.bytes,
 				"duration", time.Since(start),
 				"remote", r.RemoteAddr)
+			log.InfoContext(r.Context(), "request", attrs...)
 		})
 	}
 }

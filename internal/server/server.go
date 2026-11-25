@@ -55,6 +55,7 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("POST /v1/keys", a.createKey)
 	mux.HandleFunc("DELETE /v1/keys/{id}", a.deleteKey)
 	mux.Handle("GET "+webui.Prefix, webui.Handler())
+	mux.Handle("GET /favicon.ico", webui.Favicon())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, webui.Prefix, http.StatusFound)
 	})

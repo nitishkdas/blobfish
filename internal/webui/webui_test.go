@@ -77,3 +77,12 @@ func TestNoUnsafeDOM(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFavicon(t *testing.T) {
+	rr := httptest.NewRecorder()
+	Favicon().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/favicon.ico", nil))
+	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/svg+xml" ||
+		!strings.Contains(rr.Body.String(), "<svg") {
+		t.Fatalf("favicon: %d %q", rr.Code, rr.Header().Get("Content-Type"))
+	}
+}
