@@ -17,6 +17,10 @@ const state = {
   // remember their own bucket, so browsing elsewhere doesn't disturb them.
   uploads: [],
   uploadsCollapsed: false,
+  // "files" or "keys". The keys page exists only for *:admin keys.
+  view: "files",
+  isAdmin: false,
+  apiKeys: [],
 };
 let nextUploadId = 1;
 
@@ -48,6 +52,8 @@ const ICONS = {
   check: ["M5 12.5l4.5 4.5L19 7"],
   alert: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18", "M12 7.5v5.5", "M12 16.5v.01"],
   retry: ["M4 12a8 8 0 1 0 2.35-5.65", "M4 4v4.5h4.5"],
+  key: ["M8 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8", "M12 12h9", "M18 12v3", "M21 12v2.5"],
+  plus: ["M12 5v14", "M5 12h14"],
 };
 
 function icon(name) {
@@ -68,6 +74,31 @@ function icon(name) {
 // iconButton is a square button whose label lives in aria-label and title.
 function iconButton(name, label, onclick, extraClass = "") {
   return h("button", { class: `icon-btn ${extraClass}`.trim(), type: "button", "aria-label": label, title: label, onclick }, icon(name));
+}
+
+// confirmDialog is the app-styled replacement for window.confirm. It
+// resolves true only for the confirm button; Cancel, Esc and a click on the
+// backdrop all resolve false. Cancel gets focus so a reflexive Enter is safe.
+function confirmDialog({ title, body = [], confirmLabel, danger = true }) {
+  const dialog = document.getElementById("confirm");
+  document.getElementById("confirm-title").textContent = title;
+  document.getElementById("confirm-body").replaceChildren(
+    ...[body].flat().map((part) => (typeof part === "string" ? h("p", {}, part) : part)));
+  const ok = document.getElementById("confirm-ok");
+  ok.textContent = confirmLabel;
+  ok.className = danger ? "danger-solid" : "primary";
+  dialog.returnValue = "";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+    dialog.showModal();
+    document.getElementById("confirm-cancel").focus();
+  });
+}
+
+// Clicking the dimmed backdrop (the dialog element itself, outside its
+// form) closes any dialog, like Esc does.
+for (const d of document.querySelectorAll("dialog")) {
+  d.addEventListener("click", (e) => { if (e.target === d) d.close(); });
 }
 
 function toast(message, { error = false, detail = "" } = {}) {
@@ -169,10 +200,8 @@ function renderLogin(message = "") {
       error.textContent = "";
       try {
         const res = await api("GET", "/v1/buckets", { key });
-        state.key = key;
         saveKey(key, remember.checked);
-        state.buckets = res.buckets;
-        renderApp();
+        await enterApp(key, res.buckets);
       } catch (err) {
         error.textContent = err.status === 401 ? "That key was not accepted." : err.message;
       } finally {
@@ -193,12 +222,29 @@ function renderLogin(message = "") {
   input.focus();
 }
 
+// enterApp finishes sign-in. Only "*:admin" keys may list API keys, so a
+// successful GET /v1/keys is how the UI knows to offer the keys page.
+async function enterApp(key, buckets) {
+  state.key = key;
+  state.buckets = buckets;
+  try {
+    state.apiKeys = (await api("GET", "/v1/keys")).keys;
+    state.isAdmin = true;
+  } catch {
+    state.isAdmin = false;
+  }
+  renderApp();
+}
+
 function signOut(message = "") {
   for (const job of state.uploads) job.xhr?.abort();
   state.uploads = [];
   renderUploadPanel();
   forgetKey();
-  Object.assign(state, { key: null, buckets: [], bucket: null, prefix: "", folders: [], files: [], cursor: "" });
+  Object.assign(state, {
+    key: null, buckets: [], bucket: null, prefix: "", folders: [], files: [], cursor: "",
+    view: "files", isAdmin: false, apiKeys: [],
+  });
   renderLogin(message);
 }
 
@@ -213,6 +259,10 @@ function renderApp() {
       h("img", { src: "favicon.svg", alt: "" }),
       h("span", { class: "brand" }, "BlobFish"),
       h("span", { class: "spacer" }),
+      state.isAdmin && h("button", {
+        class: "link with-icon", "aria-current": state.view === "keys" ? "page" : null,
+        onclick: openKeysPage,
+      }, icon("key"), "API keys"),
       h("button", { class: "link", onclick: () => signOut() }, "Sign out")),
     h("nav", { class: "side", "aria-label": "Buckets" }, renderSidebar()),
     renderMain()));
@@ -226,7 +276,7 @@ function renderSidebar() {
       ? h("p", { class: "muted", style: null }, "No buckets yet.")
       : h("ul", {}, state.buckets.map((b) =>
         h("li", {}, h("button", {
-          "aria-current": b.name === state.bucket ? "true" : "false",
+          "aria-current": state.view === "files" && b.name === state.bucket ? "true" : "false",
           onclick: () => openBucket(b.name),
         }, b.name)))),
     h("form", {
@@ -246,6 +296,7 @@ function renderSidebar() {
 }
 
 function renderMain() {
+  if (state.view === "keys") return renderKeysPage();
   const main = h("section", { class: "main", "aria-label": "Objects" });
   if (!state.bucket) {
     main.append(h("p", { class: "empty" }, state.buckets.length ? "Pick a bucket to browse its files." : "Create a bucket to get started."));
@@ -321,6 +372,7 @@ async function refreshBuckets() {
 }
 
 async function openBucket(name) {
+  state.view = "files";
   state.bucket = name;
   await openPrefix("");
   renderApp(); // updates the selected bucket in the sidebar
@@ -370,21 +422,18 @@ async function share(key) {
     } catch (err) { out.value = ""; showError(err); }
   };
   ttl.onchange = make;
-  document.getElementById("share-copy").onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(out.value);
-      toast("Link copied");
-    } catch {
-      out.select(); // clipboard API needs HTTPS; let the user copy by hand
-      toast("Press Ctrl+C (⌘C) to copy");
-    }
-  };
+  document.getElementById("share-copy").onclick = () => copyField(out, "Link copied");
   dialog.showModal();
   await make();
 }
 
 async function deleteObject(key) {
-  if (!confirm(`Delete "${key}"? This cannot be undone.`)) return;
+  const ok = await confirmDialog({
+    title: "Delete this file?",
+    body: [h("p", { class: "mono confirm-target" }, key), "This can't be undone."],
+    confirmLabel: "Delete",
+  });
+  if (!ok) return;
   try {
     await api("DELETE", objectPath(state.bucket, key));
     toast("Deleted");
@@ -393,7 +442,12 @@ async function deleteObject(key) {
 }
 
 async function deleteBucket() {
-  if (!confirm(`Delete bucket "${state.bucket}"? It must be empty.`)) return;
+  const ok = await confirmDialog({
+    title: `Delete bucket “${state.bucket}”?`,
+    body: ["Only an empty bucket can be deleted. This can't be undone."],
+    confirmLabel: "Delete bucket",
+  });
+  if (!ok) return;
   try {
     await api("DELETE", `/v1/buckets/${encodeURIComponent(state.bucket)}`);
     toast(`Deleted bucket ${state.bucket}`);
@@ -599,6 +653,167 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 
+// ---------- API keys (admin only) ----------
+
+const PERMS = [
+  ["rw", "Read & write"],
+  ["r", "Read only"],
+  ["w", "Write only"],
+  ["admin", "Admin"],
+];
+const PERM_LABEL = Object.fromEntries(PERMS);
+
+function describeScope(scope) {
+  const i = scope.lastIndexOf(":");
+  const bucket = scope.slice(0, i);
+  const perm = scope.slice(i + 1);
+  return `${bucket === "*" ? "All buckets" : bucket} · ${PERM_LABEL[perm] || perm}`;
+}
+
+async function openKeysPage() {
+  state.view = "keys";
+  try {
+    state.apiKeys = (await api("GET", "/v1/keys")).keys;
+  } catch (err) { showError(err); }
+  renderApp();
+}
+
+function renderKeysPage() {
+  const page = h("section", { class: "main keys-page", "aria-label": "API keys" });
+  page.append(
+    h("div", { class: "page-head" },
+      h("h1", {}, "API keys"),
+      h("p", { class: "muted" },
+        "Give each app its own key, limited to the buckets it needs. A key for one bucket gets “access denied” everywhere else.")),
+    renderKeyForm(),
+    h("h2", { class: "section-title" }, `Existing keys (${state.apiKeys.length})`),
+    renderKeyTable());
+  return page;
+}
+
+function renderKeyForm() {
+  const name = h("input", { required: true, maxlength: 64, placeholder: "e.g. app1 production", "aria-label": "Key name" });
+  const rows = h("div", { class: "scope-rows" });
+  const hint = h("p", { class: "hint", role: "status" });
+
+  const bucketOptions = () => [
+    ...state.buckets.map((b) => h("option", { value: b.name }, b.name)),
+    h("option", { value: "*" }, "All buckets"),
+  ];
+  const updateHint = () => {
+    const all = [...rows.querySelectorAll(".scope-row")].some((r) =>
+      r.querySelector(".scope-bucket").value === "*" && r.querySelector(".scope-perm").value === "admin");
+    hint.textContent = all
+      ? "All buckets + Admin is a full admin key: it can create buckets and manage keys. Apps almost never need this."
+      : "";
+  };
+  const addRow = (bucket) => {
+    const b = h("select", { class: "scope-bucket", "aria-label": "Bucket", onchange: updateHint }, bucketOptions());
+    if (bucket) b.value = bucket;
+    const p = h("select", { class: "scope-perm", "aria-label": "Permission", onchange: updateHint },
+      PERMS.map(([v, label]) => h("option", { value: v }, label)));
+    const row = h("div", { class: "scope-row" }, b, p,
+      iconButton("close", "Remove this access", () => {
+        if (rows.children.length > 1) { row.remove(); updateHint(); }
+      }));
+    rows.append(row);
+    updateHint();
+  };
+  addRow(state.bucket || state.buckets[0]?.name || "*");
+
+  const submit = h("button", { class: "primary", type: "submit" }, "Create key");
+  return h("form", {
+    class: "card key-form",
+    onsubmit: async (ev) => {
+      ev.preventDefault();
+      const scopes = [...new Set([...rows.querySelectorAll(".scope-row")].map((r) =>
+        `${r.querySelector(".scope-bucket").value}:${r.querySelector(".scope-perm").value}`))];
+      submit.disabled = true;
+      try {
+        const created = await api("POST", "/v1/keys", { body: { name: name.value.trim(), scopes } });
+        showNewKey(created);
+        state.apiKeys = (await api("GET", "/v1/keys")).keys;
+        rerenderMain();
+      } catch (err) {
+        showError(err);
+      } finally {
+        submit.disabled = false;
+      }
+    },
+  },
+  h("h2", { class: "section-title" }, "New key"),
+  h("label", { class: "field" }, "Name", name),
+  h("div", { class: "field" }, h("span", {}, "Access"), rows,
+    h("button", { type: "button", class: "link with-icon add-scope", onclick: () => addRow("*") }, icon("plus"), "Add another bucket")),
+  hint,
+  h("div", { class: "row" }, submit));
+}
+
+function renderKeyTable() {
+  if (state.apiKeys.length === 0) return h("p", { class: "empty" }, "No keys.");
+  return h("table", {},
+    h("thead", {}, h("tr", {},
+      h("th", { scope: "col" }, "Name"),
+      h("th", { scope: "col" }, "Access"),
+      h("th", { scope: "col", class: "when" }, "Created"),
+      h("th", { scope: "col", class: "actions" }, h("span", { class: "visually-hidden" }, "Actions")))),
+    h("tbody", {}, state.apiKeys.map((k) => h("tr", {},
+      h("td", { class: "name" }, k.name, h("span", { class: "key-id mono", title: "Key ID" }, k.id)),
+      h("td", {}, h("div", { class: "chips" }, k.scopes.map((sc) =>
+        h("span", { class: sc.startsWith("*:admin") ? "chip strong" : "chip" }, describeScope(sc))))),
+      h("td", { class: "when" }, dateFmt.format(new Date(k.created))),
+      h("td", { class: "actions" }, iconButton("trash", `Revoke ${k.name}`, () => revokeKey(k), "danger"))))));
+}
+
+async function revokeKey(k) {
+  const ok = await confirmDialog({
+    title: `Revoke “${k.name}”?`,
+    body: [
+      h("div", { class: "chips" }, k.scopes.map((sc) => h("span", { class: "chip" }, describeScope(sc)))),
+      "Apps using this key lose access immediately.",
+      "If you're signed in with this key, you'll be signed out.",
+    ],
+    confirmLabel: "Revoke key",
+  });
+  if (!ok) return;
+  try {
+    await api("DELETE", `/v1/keys/${encodeURIComponent(k.id)}`);
+    toast(`Revoked ${k.name}`);
+    state.apiKeys = (await api("GET", "/v1/keys")).keys; // a 401 here means we revoked ourselves
+    rerenderMain();
+  } catch (err) {
+    if (err.code === "LastAdminKey") {
+      toast("This is the last admin key. Create another admin key first, then revoke this one.", { error: true });
+      return;
+    }
+    if (err.status !== 401) showError(err);
+  }
+}
+
+function showNewKey(created) {
+  const dialog = document.getElementById("new-key");
+  const out = document.getElementById("new-key-value");
+  out.value = created.key;
+  document.getElementById("new-key-name").textContent = created.name;
+  document.getElementById("new-key-scopes").replaceChildren(
+    ...created.scopes.map((sc) => h("span", { class: "chip" }, describeScope(sc))));
+  document.getElementById("new-key-copy").onclick = () => copyField(out, "Key copied");
+  // The token must not linger in the page once the dialog is closed.
+  dialog.addEventListener("close", () => { out.value = ""; }, { once: true });
+  dialog.showModal();
+  out.select();
+}
+
+async function copyField(input, done) {
+  try {
+    await navigator.clipboard.writeText(input.value);
+    toast(done);
+  } catch {
+    input.select(); // the clipboard API needs HTTPS; let the user copy by hand
+    toast("Press Ctrl+C (⌘C) to copy");
+  }
+}
+
 // ---------- Start ----------
 
 async function start() {
@@ -606,9 +821,7 @@ async function start() {
   if (!key) { renderLogin(); return; }
   try {
     const res = await api("GET", "/v1/buckets", { key });
-    state.key = key;
-    state.buckets = res.buckets;
-    renderApp();
+    await enterApp(key, res.buckets);
   } catch (err) {
     forgetKey();
     renderLogin(err.status === 401 ? "Your saved key no longer works. Sign in again." : err.message);

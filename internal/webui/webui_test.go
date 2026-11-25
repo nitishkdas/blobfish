@@ -50,7 +50,8 @@ func TestServesAssetsWithSecurityHeaders(t *testing.T) {
 // are attacker-controlled strings, so the UI must never parse them as HTML,
 // and the CSP forbids inline script/style, so none may appear.
 func TestNoUnsafeDOM(t *testing.T) {
-	banned := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function`)
+	// Native alert/confirm/prompt don't match the app; use confirmDialog.
+	banned := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(|new Function|\b(alert|confirm|prompt)\(`)
 	inline := regexp.MustCompile(`<script>|<script [^>]*>[^<]|<style|\sstyle="|\son[a-z]+="`)
 	err := fs.WalkDir(files, "static", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {

@@ -161,6 +161,51 @@ dialog::backdrop { background: rgb(0 0 0 / .35); }
 .dialog p { margin: 0; }
 #share-url { width: 100%; }
 
+/* API keys page */
+.top .link[aria-current="page"] { color: var(--accent); font-weight: 600; }
+.top .link.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+.keys-page { max-width: 880px; }
+.page-head h1 { font-size: 20px; margin: 4px 0 4px; }
+.page-head p { margin: 0 0 20px; }
+.section-title { font-size: 14px; margin: 24px 0 10px; }
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 4px 16px 16px;
+}
+.key-form { display: grid; gap: 12px; }
+.key-form .section-title { margin: 12px 0 0; }
+.key-form input { max-width: 360px; }
+.scope-rows { display: grid; gap: 6px; }
+.scope-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.scope-row select { min-width: 170px; }
+.add-scope { justify-self: start; padding-left: 0; }
+.hint { margin: 0; color: var(--danger); font-size: 13px; }
+.hint:empty { display: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  font-size: 12px; padding: 2px 8px; border-radius: 999px;
+  background: var(--accent-soft); white-space: nowrap;
+}
+.chip.strong { background: var(--accent); color: var(--accent-ink); }
+.key-id { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+.warn { margin: 0; color: var(--danger); }
+#new-key-value { width: 100%; }
+code { font-family: var(--mono); font-size: 12px; }
+
+/* Confirm dialog */
+.confirm-body { display: grid; gap: 8px; color: var(--muted); }
+.confirm-body p { margin: 0; }
+.confirm-target {
+  color: var(--text); word-break: break-all;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+}
+button.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+button.danger-solid:hover { filter: brightness(1.08); }
+@media (prefers-color-scheme: dark) { button.danger-solid { color: #2a0f0d; } }
+dialog[open] { animation: dialog-in .14s ease-out; }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { dialog[open] { animation: none; } }
+
 /* Bottom-right dock: upload panel above toasts */
 .dock {
   position: fixed; bottom: 16px; right: 16px; z-index: 10;

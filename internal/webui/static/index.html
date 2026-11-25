@@ -33,5 +33,28 @@
       </div>
     </form>
   </dialog>
+  <dialog id="confirm">
+    <form method="dialog" class="dialog">
+      <h2 id="confirm-title"></h2>
+      <div id="confirm-body" class="confirm-body"></div>
+      <div class="row end">
+        <button value="cancel" id="confirm-cancel">Cancel</button>
+        <button value="ok" id="confirm-ok" class="danger-solid">Delete</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="new-key">
+    <form method="dialog" class="dialog">
+      <h2>Key created: <span id="new-key-name"></span></h2>
+      <p class="warn">Copy this key now. BlobFish keeps only a hash of it, so it can never be shown again.</p>
+      <input id="new-key-value" class="mono" readonly aria-label="New API key">
+      <div id="new-key-scopes" class="chips"></div>
+      <p class="muted">Give it to your app as an environment variable (for example <code>BLOBFISH_KEY</code>) and send it as <code>Authorization: Bearer &lt;key&gt;</code>.</p>
+      <div class="row end">
+        <button type="button" id="new-key-copy" class="primary">Copy key</button>
+        <button value="close">Done</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>
