@@ -71,7 +71,11 @@ type Range struct {
 // size, or returns ErrInvalidRange if no byte of the object is selected.
 func (r Range) Resolve(size int64) (off, n int64, err error) {
 	if r.Start < 0 {
-		n = min(-r.Start, size)
+		// Compare before negating: -math.MinInt64 overflows to itself.
+		n = size
+		if r.Start > -size {
+			n = -r.Start
+		}
 		if n == 0 {
 			return 0, 0, fmt.Errorf("%w: suffix range on empty object", ErrInvalidRange)
 		}

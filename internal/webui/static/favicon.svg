@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- An original sad pink blobfish: droopy body, small fins, frown. -->
+  <path d="M8 34c0-13 11-22 24-22s24 9 24 22c0 9-6 14-11 16-3 1-4 4-8 4h-10c-4 0-5-3-8-4C13 48 8 43 8 34z" fill="#e9a3b4"/>
+  <path d="M10 38c-4 1-7 4-6 7 3 0 6-2 8-4zM54 38c4 1 7 4 6 7-3 0-6-2-8-4z" fill="#d98ba0"/>
+  <circle cx="23" cy="29" r="3" fill="#3b2a30"/>
+  <circle cx="41" cy="29" r="3" fill="#3b2a30"/>
+  <path d="M24 46c4-4 12-4 16 0" stroke="#3b2a30" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M28 33c2 3 6 3 8 0" fill="#d98ba0"/>
+</svg>

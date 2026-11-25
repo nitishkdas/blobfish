@@ -11,6 +11,7 @@ import (
 
 	"github.com/nitishkdas/blobfish/internal/auth"
 	"github.com/nitishkdas/blobfish/internal/store"
+	"github.com/nitishkdas/blobfish/internal/webui"
 )
 
 // Options are the dependencies and settings the HTTP layer needs.
@@ -53,6 +54,10 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET /v1/keys", a.listKeys)
 	mux.HandleFunc("POST /v1/keys", a.createKey)
 	mux.HandleFunc("DELETE /v1/keys/{id}", a.deleteKey)
+	mux.Handle("GET "+webui.Prefix, webui.Handler())
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, webui.Prefix, http.StatusFound)
+	})
 	mux.HandleFunc("/", handleNotFound)
 
 	// Object routes bypass ServeMux on purpose: it cleans paths and

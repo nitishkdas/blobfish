@@ -6,8 +6,8 @@ BlobFish is a small, single-node object store written in Go. It is one binary
 and one data folder, with a curl-friendly HTTP + JSON API, built for small
 servers (1 vCPU / 512 MB VPS, Raspberry Pi).
 
-**Status:** early development. The storage engine and `/v1` API work, but
-nothing here is ready for real data yet.
+**Status:** early development. The storage engine, `/v1` API and web UI work,
+but BlobFish has not been used with real data yet.
 
 ## Build and run
 
@@ -22,6 +22,12 @@ curl localhost:8080/healthz     # {"status":"ok"}
 On first start, with no API keys yet, BlobFish creates an admin key and
 prints it to stderr **once**. Lost it? Stop the server and run
 `./blobfish -new-admin-key` to mint another.
+
+## Web UI
+
+Open `http://localhost:8080/` and sign in with an API key. You can browse
+buckets and folders, upload by button or drag and drop, download, delete,
+and make share links that expire (1 hour to 7 days).
 
 ## Using the API
 

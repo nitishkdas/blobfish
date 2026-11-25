@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>BlobFish</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="app" class="boot">Loading…</div>
+  <div id="toasts" role="status" aria-live="polite"></div>
+  <dialog id="share">
+    <form method="dialog" class="dialog">
+      <h2>Share link</h2>
+      <p class="muted">Anyone with this link can download the file until it expires. No API key needed.</p>
+      <label class="field">Expires in
+        <select id="share-ttl">
+          <option value="3600">1 hour</option>
+          <option value="86400" selected>1 day</option>
+          <option value="604800">7 days</option>
+        </select>
+      </label>
+      <input id="share-url" class="mono" readonly aria-label="Share link">
+      <div class="row end">
+        <button type="button" id="share-copy" class="primary">Copy link</button>
+        <button value="close">Close</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

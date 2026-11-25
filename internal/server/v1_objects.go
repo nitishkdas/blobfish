@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -222,9 +223,32 @@ func setObjectHeaders(w http.ResponseWriter, info store.ObjectInfo) {
 	h.Set("Last-Modified", info.Modified.UTC().Format(http.TimeFormat))
 	h.Set("Accept-Ranges", "bytes")
 	h.Set("X-Content-Type-Options", "nosniff")
+	if canRunScript(info.ContentType) {
+		// An uploaded HTML/SVG/XML file opened from this origin could run
+		// script next to the web UI and read its stored API key. The sandbox
+		// gives it an opaque origin with scripts disabled.
+		h.Set("Content-Security-Policy", "sandbox")
+	}
 	for k, v := range info.User {
 		h.Set(metaHeader+k, v)
 	}
+}
+
+// canRunScript reports whether a browser may execute script in a document
+// of this type. Unparseable types count as unsafe. Other types (PDF, images,
+// text/plain) are left alone: with nosniff they cannot turn into HTML, and
+// Chrome refuses to show PDFs under a sandbox CSP.
+func canRunScript(contentType string) bool {
+	mt, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return true
+	}
+	switch mt {
+	case "text/html", "application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml",
+		"text/xsl", "application/xslt+xml", "multipart/x-mixed-replace":
+		return true
+	}
+	return strings.HasSuffix(mt, "+xml")
 }
 
 func quoteETag(etag string) string { return `"` + etag + `"` }

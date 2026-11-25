@@ -10,7 +10,7 @@ BlobFish is a minimal, single-node, open-source object store written in Go. It s
 
 - Working title was "tinys3". The name is now **BlobFish**, command `blobfish`.
 - License: **Apache 2.0**. Fully open source: no paid edition, no closed features.
-- Status: milestones 1, 2 and 4 done (skeleton, storage engine, /v1 API + auth). Power-cut gate test still open. Next: web UI and hardening.
+- Status: milestones 1–7 done (skeleton, storage engine, /v1 API + auth, web UI + hardening). Open: power-cut gate test, a real-browser pass over the UI. Next: dogfooding (milestones 8–9).
 
 ## Why it exists
 
@@ -128,7 +128,13 @@ CGO_ENABLED=0 go build -o blobfish ./cmd/blobfish   # static binary
 go test -race -count=1 ./...                        # full suite; must pass
 go test -race -run TestLoad/env ./internal/config   # single test / subtest
 go vet ./... && gofmt -l .                          # CI fails on either
+go test -short ./...                                # skip kill -9 and 256 MB streaming tests
+go test -run '^$' -fuzz '^FuzzList$' -fuzztime 60s ./internal/engine   # one fuzz target at a time
+BLOBFISH_LOADTEST=1 go test -run TestLoadSmallMachine -v ./internal/server   # 1-CPU load report
+node --check internal/webui/static/app.js           # UI has no build step; this is its only lint
 ```
+
+Fuzz targets: `FuzzRangeResolve`, `FuzzValidateKey`, `FuzzValidateBucketName` (store), `FuzzParseRange`, `FuzzETagMatches` (server), `FuzzList` (engine, checks pagination against an in-memory model).
 
 CI (`.github/workflows/ci.yml`) runs gofmt, vet, race tests, then builds linux amd64/arm64 static binaries.
 
@@ -140,6 +146,9 @@ CI (`.github/workflows/ci.yml`) runs gofmt, vet, race tests, then builds linux a
   - `/v1/b/...` object routes deliberately bypass `ServeMux` (it would clean/redirect keys like `a//b`); `api.objects` splits bucket/key from the raw decoded path.
   - Every handler calls `a.authorize(...)` before touching the store, so a 403 never reveals whether a bucket/key exists.
   - A checksum failure discovered mid-download panics with `http.ErrAbortHandler` to cut the connection (headers are already sent).
+  - Object responses with script-capable types (HTML, SVG, XML, `+xml`, unparseable) get `Content-Security-Policy: sandbox` so an uploaded file can't run script on the UI's origin and read its stored key. Not applied to PDFs/images: Chrome won't render sandboxed PDFs.
+  - `TestStreamingMemory` moves 256 MB through HTTP and fails if heap grows > 48 MB; it catches any `io.ReadAll` on bodies.
+- `internal/webui` – embedded static UI (`static/`: plain HTML/CSS/ES module, no build step) at `/ui/`; `/` redirects there. Strict CSP (no inline script/style), so build DOM with the `h()` helper and `textContent`, never `innerHTML` (`TestNoUnsafeDOM` enforces both). The UI only calls `/v1` with the pasted key (sessionStorage, or localStorage if "remember"); downloads and share links go through `/v1/presign`. Browsers normalize `.`/`..` path segments, so such keys are API-only.
 - `internal/auth` – `Authenticator` interface (SigV4 can plug in later) and `Service`: bearer tokens (`bf_` + 32 random bytes, only SHA-256 stored via `store.Keys`), scopes `bucket:r|w|rw|admin` / `*:...`, presign/verify. `Principal.Can(perm, bucket, key)`; server-wide ops use bucket `"*"`, which only `*:` scopes match. Refuses deleting the last `*:admin` key. First start with no keys prints a bootstrap admin key to stderr once; `blobfish -new-admin-key` mints another offline.
 - `internal/store` – `Store`/`Buckets` interfaces, value types, sentinel errors (`ErrNoSuchKey`, …), name/key/range validation. Frontends import only this.
 - `internal/engine` – the implementation. bbolt buckets: `buckets` (name→record), `objects/<bucket>` (nested; key→JSON record with blob ID), `blobs` (index of committed blob IDs). A blob file not in `blobs` is an orphan; the janitor deletes it (at `Open` and hourly). Running Puts register tmp names/blob IDs in `inflight` so the janitor skips them; keep "track before rename, untrack after commit".

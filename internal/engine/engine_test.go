@@ -19,7 +19,7 @@ import (
 
 const testBucket = "test-bucket"
 
-func openTest(t *testing.T, dir string) *Engine {
+func openTest(t testing.TB, dir string) *Engine {
 	t.Helper()
 	e, err := Open(dir, Options{})
 	if err != nil {

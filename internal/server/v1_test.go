@@ -481,3 +481,50 @@ func walk(t *testing.T, dir string, fn func(path string)) {
 		t.Fatal(err)
 	}
 }
+
+func TestSandboxScriptableContent(t *testing.T) {
+	a := newTestAPI(t)
+	a.must(http.StatusCreated, "PUT", "/v1/buckets/sbx", a.admin, nil)
+	tests := []struct {
+		contentType string
+		sandboxed   bool
+	}{
+		{"text/html", true},
+		{"text/html; charset=utf-8", true},
+		{"TEXT/HTML", true},
+		{"image/svg+xml", true},
+		{"application/xhtml+xml", true},
+		{"application/atom+xml", true},
+		{"text/xml", true},
+		{"not a / valid type;;", true},
+		{"application/pdf", false},
+		{"image/png", false},
+		{"text/plain", false},
+		{"application/octet-stream", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.contentType, func(t *testing.T) {
+			a.must(http.StatusOK, "PUT", "/v1/b/sbx/f", a.admin, strings.NewReader("<script>alert(1)</script>"),
+				"Content-Type", tt.contentType)
+			for _, method := range []string{"GET", "HEAD"} {
+				rr := a.must(http.StatusOK, method, "/v1/b/sbx/f", a.admin, nil)
+				got := rr.Header().Get("Content-Security-Policy") == "sandbox"
+				if got != tt.sandboxed {
+					t.Errorf("%s: sandboxed = %v, want %v", method, got, tt.sandboxed)
+				}
+				if rr.Header().Get("X-Content-Type-Options") != "nosniff" {
+					t.Errorf("%s: missing nosniff", method)
+				}
+			}
+		})
+	}
+}
+
+func TestRootRedirectsToUI(t *testing.T) {
+	a := newTestAPI(t)
+	rr := a.must(http.StatusFound, "GET", "/", "", nil)
+	if loc := rr.Header().Get("Location"); loc != "/ui/" {
+		t.Errorf("Location = %q", loc)
+	}
+	a.must(http.StatusOK, "GET", "/ui/", "", nil)
+}

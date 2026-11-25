@@ -116,6 +116,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		// Only the header read is bounded. Bodies can be multi-GB streams on
 		// slow links, so there is deliberately no ReadTimeout/WriteTimeout.
 		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    64 << 10, // ample for X-Meta-* (capped at 2 KB of values)
 		IdleTimeout:       120 * time.Second,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 		// No BaseContext tied to ctx: on SIGTERM, in-flight uploads should
