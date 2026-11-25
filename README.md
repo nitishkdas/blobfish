@@ -67,7 +67,10 @@ buckets and managing keys needs `*:admin`. Errors always look like
 
 Your app's backend keeps the API key and only signs URLs; the user's browser
 sends the file directly to BlobFish, so large uploads never pass through
-your app. Allow your site first: `"cors_allowed_origins": ["https://app.example.com"]`.
+your app. First allow your site on the bucket: in the web UI open the bucket,
+click **Browser access** and add `https://app.example.com` (or send
+`PATCH /v1/buckets/<bucket>` with `{"corsOrigins": ["https://app.example.com"]}`).
+Each bucket has its own list, and changes apply immediately.
 
 ```js
 // Backend (has the key): sign an upload URL for this user.
@@ -83,7 +86,8 @@ const res = await fetch(url, { method: "PUT", body: file, headers: { "Content-Ty
 const sha256 = res.headers.get("ETag");   // tell your backend it's done
 ```
 
-Pages on other sites are refused by the browser. Mobile apps, scripts and
+Pages on other sites, or on your site but for other buckets, are refused by
+the browser. Mobile apps, scripts and
 servers aren't browsers, so they need no CORS setting at all.
 
 ## Production
@@ -132,7 +136,6 @@ See `blobfish.example.json`.
 | `max_connections` (extra clients wait in the accept queue) | `BLOBFISH_MAX_CONNECTIONS` | `1000` |
 | `min_free_space` (bytes uploads never use, so deletes always fit; 0 = off) | `BLOBFISH_MIN_FREE_SPACE` | `536870912` (512 MiB) |
 | `trusted_proxies` (reverse proxies whose `X-Forwarded-For`/`-Proto` are believed) | `BLOBFISH_TRUSTED_PROXIES` (comma-separated) | none |
-| `cors_allowed_origins` (web pages allowed to call BlobFish from the browser, e.g. `["https://app.example.com"]`; `"*"` = any) | `BLOBFISH_CORS_ALLOWED_ORIGINS` (comma-separated) | none |
 
 ## License
 

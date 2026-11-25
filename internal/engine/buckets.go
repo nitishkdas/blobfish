@@ -76,7 +76,7 @@ func (e *Engine) ListBuckets(ctx context.Context) ([]store.BucketInfo, error) {
 			if err := json.Unmarshal(v, &r); err != nil {
 				return fmt.Errorf("decode bucket %s: %w", k, err)
 			}
-			out = append(out, store.BucketInfo{Name: string(k), Created: r.Created, Public: r.Public})
+			out = append(out, r.info(string(k)))
 			return nil
 		})
 	})
@@ -102,11 +102,25 @@ func (e *Engine) GetBucket(ctx context.Context, name string) (store.BucketInfo, 
 	if err != nil {
 		return store.BucketInfo{}, err
 	}
-	return store.BucketInfo{Name: name, Created: r.Created, Public: r.Public}, nil
+	return r.info(name), nil
 }
 
 // SetBucketPublic implements store.Buckets.
 func (e *Engine) SetBucketPublic(ctx context.Context, name string, public bool) (store.BucketInfo, error) {
+	return e.updateBucket(name, func(r *bucketRecord) { r.Public = public })
+}
+
+// SetBucketCORS implements store.Buckets.
+func (e *Engine) SetBucketCORS(ctx context.Context, name string, origins []string) (store.BucketInfo, error) {
+	clean, err := store.NormalizeCORSOrigins(origins)
+	if err != nil {
+		return store.BucketInfo{}, err
+	}
+	return e.updateBucket(name, func(r *bucketRecord) { r.CORSOrigins = clean })
+}
+
+// updateBucket changes one bucket's settings in a single transaction.
+func (e *Engine) updateBucket(name string, change func(*bucketRecord)) (store.BucketInfo, error) {
 	if err := store.ValidateBucketName(name); err != nil {
 		return store.BucketInfo{}, err
 	}
@@ -120,7 +134,7 @@ func (e *Engine) SetBucketPublic(ctx context.Context, name string, public bool) 
 		if err := json.Unmarshal(v, &r); err != nil {
 			return err
 		}
-		r.Public = public
+		change(&r)
 		val, err := json.Marshal(r)
 		if err != nil {
 			return err
@@ -128,7 +142,7 @@ func (e *Engine) SetBucketPublic(ctx context.Context, name string, public bool) 
 		return buckets.Put([]byte(name), val)
 	})
 	if err != nil {
-		return store.BucketInfo{}, fmt.Errorf("set bucket visibility: %w", err)
+		return store.BucketInfo{}, fmt.Errorf("update bucket: %w", err)
 	}
-	return store.BucketInfo{Name: name, Created: r.Created, Public: r.Public}, nil
+	return r.info(name), nil
 }

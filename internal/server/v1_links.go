@@ -155,6 +155,9 @@ func (a *api) serveLink(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	if a.cors(w, r, rec.Bucket) {
+		return
+	}
 	if !rec.Expires.IsZero() && time.Now().After(rec.Expires) {
 		a.fail(w, r, fmt.Errorf("%w on %s", errLinkExpired, rec.Expires.Format(time.RFC3339)))
 		return
@@ -178,22 +181,34 @@ func (a *api) updateBucket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Public *bool `json:"public"`
+		Public      *bool     `json:"public"`
+		CORSOrigins *[]string `json:"corsOrigins"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	if req.Public == nil {
-		a.fail(w, r, badRequest(`nothing to change: send {"public": true|false}`))
+	if req.Public == nil && req.CORSOrigins == nil {
+		a.fail(w, r, badRequest(`nothing to change: send {"public": true|false} and/or {"corsOrigins": [...]}`))
 		return
 	}
-	info, err := a.buckets.SetBucketPublic(r.Context(), bucket, *req.Public)
-	if err != nil {
-		a.fail(w, r, err)
-		return
+	var info store.BucketInfo
+	var err error
+	if req.CORSOrigins != nil {
+		if info, err = a.buckets.SetBucketCORS(r.Context(), bucket, *req.CORSOrigins); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		a.log.InfoContext(r.Context(), "bucket browser access changed",
+			"request_id", RequestID(r.Context()), "bucket", bucket, "origins", info.CORSOrigins)
 	}
-	a.log.InfoContext(r.Context(), "bucket visibility changed",
-		"request_id", RequestID(r.Context()), "bucket", bucket, "public", info.Public)
+	if req.Public != nil {
+		if info, err = a.buckets.SetBucketPublic(r.Context(), bucket, *req.Public); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		a.log.InfoContext(r.Context(), "bucket visibility changed",
+			"request_id", RequestID(r.Context()), "bucket", bucket, "public", info.Public)
+	}
 	writeJSON(w, http.StatusOK, toBucketJSON(info))
 }

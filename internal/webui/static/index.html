@@ -67,6 +67,23 @@
       <div id="details-actions" class="row end wrap"></div>
     </form>
   </dialog>
+  <dialog id="cors">
+    <form method="dialog" class="dialog">
+      <h2 id="cors-title" class="break">Browser access</h2>
+      <p class="muted">Web pages on these sites may upload to and download from this bucket directly, for example to a presigned upload URL your app creates. Apps, servers and scripts don't need this.</p>
+      <ul id="cors-list" class="cors-list"></ul>
+      <div class="row">
+        <input id="cors-input" class="mono" placeholder="https://app.example.com" aria-label="Website address" autocomplete="off" spellcheck="false">
+        <button type="button" id="cors-add">Add</button>
+      </div>
+      <p id="cors-error" class="hint" role="alert"></p>
+      <p id="cors-warn" class="warn" hidden>“*” lets pages on any website call this bucket. They still need a key or a signed link to do anything.</p>
+      <div class="row end">
+        <button value="cancel">Cancel</button>
+        <button type="button" id="cors-save" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="new-key">
     <form method="dialog" class="dialog">
       <h2>Key created: <span id="new-key-name"></span></h2>

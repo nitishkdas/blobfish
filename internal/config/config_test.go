@@ -88,15 +88,6 @@ func TestLoad(t *testing.T) {
 		{name: "trusted proxies env", env: map[string]string{"BLOBFISH_TRUSTED_PROXIES": "127.0.0.1,10.0.0.0/8"},
 			want: func(c Config) Config { c.TrustedProxies = []string{"127.0.0.1", "10.0.0.0/8"}; return c }},
 		{name: "bad trusted proxy", file: `{"trusted_proxies": ["caddy"]}`, wantErr: "trusted_proxies"},
-		{name: "cors origins env", env: map[string]string{"BLOBFISH_CORS_ALLOWED_ORIGINS": "https://app.example.com, http://localhost:3000"},
-			want: func(c Config) Config {
-				c.CORSAllowedOrigins = []string{"https://app.example.com", "http://localhost:3000"}
-				return c
-			}},
-		{name: "cors wildcard", file: `{"cors_allowed_origins": ["*"]}`,
-			want: func(c Config) Config { c.CORSAllowedOrigins = []string{"*"}; return c }},
-		{name: "cors with path", file: `{"cors_allowed_origins": ["https://app.example.com/"]}`, wantErr: "cors_allowed_origins"},
-		{name: "cors without scheme", file: `{"cors_allowed_origins": ["app.example.com"]}`, wantErr: "cors_allowed_origins"},
 		{name: "zero connections", env: map[string]string{"BLOBFISH_MAX_CONNECTIONS": "0"}, wantErr: "max_connections"},
 		{name: "public url no scheme", file: `{"public_url": "files.example.com"}`, wantErr: "public_url"},
 		{name: "public url with path", file: `{"public_url": "https://x.com/sub"}`, wantErr: "public_url"},

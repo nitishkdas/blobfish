@@ -40,6 +40,9 @@ type Buckets interface {
 	// SetBucketPublic makes a bucket's objects readable without a key (or
 	// not). Listing and writing always need a key.
 	SetBucketPublic(ctx context.Context, name string, public bool) (BucketInfo, error)
+	// SetBucketCORS replaces the web origins whose pages may call this
+	// bucket's objects from a browser. Empty = none.
+	SetBucketCORS(ctx context.Context, name string, origins []string) (BucketInfo, error)
 }
 
 // Links stores share links: permanent or long-lived URLs to one object
@@ -144,6 +147,9 @@ type BucketInfo struct {
 	Created time.Time
 	// Public buckets serve GET/HEAD of their objects without a key.
 	Public bool
+	// CORSOrigins are web origins ("https://app.example.com" or "*")
+	// whose pages may call this bucket's objects from a browser.
+	CORSOrigins []string
 }
 
 // ListOptions controls a List call.
@@ -192,6 +198,7 @@ var (
 	ErrDataCorrupt       = errors.New("stored data failed integrity check")
 	ErrNoSuchAPIKey      = errors.New("API key not found")
 	ErrNoSuchLink        = errors.New("share link not found")
+	ErrInvalidOrigin     = errors.New("invalid web origin")
 	// ErrInsufficientStorage: accepting the upload would cut into the free
 	// space reserve kept so deletes and metadata updates always fit.
 	ErrInsufficientStorage = errors.New("not enough free disk space")

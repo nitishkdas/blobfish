@@ -41,6 +41,11 @@ func toObjectJSON(i store.ObjectInfo) objectJSON {
 func (a *api) objects(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, objectsPrefix)
 	bucket, key, isObject := strings.Cut(rest, "/")
+	// Browser access is per bucket; settle it before auth so even error
+	// replies are readable by an allowed page.
+	if a.cors(w, r, bucket) {
+		return
+	}
 	if !isObject {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead:

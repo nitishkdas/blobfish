@@ -179,3 +179,30 @@ func TestCrashDeleteRemovesLinks(t *testing.T) {
 		t.Errorf("%d orphan blobs after restart", n)
 	}
 }
+
+func TestBucketCORS(t *testing.T) {
+	e, dir := newEngine(t)
+	ctx := context.Background()
+	b, err := e.SetBucketCORS(ctx, testBucket, []string{"https://App.example.com", "https://app.example.com"})
+	if err != nil || len(b.CORSOrigins) != 1 || b.CORSOrigins[0] != "https://app.example.com" {
+		t.Fatalf("SetBucketCORS = %+v, %v", b, err)
+	}
+	if _, err := e.SetBucketCORS(ctx, testBucket, []string{"app.example.com"}); !errors.Is(err, store.ErrInvalidOrigin) {
+		t.Errorf("bad origin: %v", err)
+	}
+	if _, err := e.SetBucketPublic(ctx, testBucket, true); err != nil {
+		t.Fatal(err)
+	}
+	e.Close()
+	e = openTest(t, dir)
+	b, _ = e.GetBucket(ctx, testBucket)
+	if len(b.CORSOrigins) != 1 || !b.Public {
+		t.Errorf("after reopen: %+v (settings must not overwrite each other)", b)
+	}
+	if b, _ := e.SetBucketCORS(ctx, testBucket, nil); len(b.CORSOrigins) != 0 {
+		t.Errorf("clearing: %+v", b)
+	}
+	if _, err := e.SetBucketCORS(ctx, "no-such", nil); !errors.Is(err, store.ErrNoSuchBucket) {
+		t.Errorf("missing bucket: %v", err)
+	}
+}

@@ -32,13 +32,18 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 }
 
 type bucketJSON struct {
-	Name    string    `json:"name"`
-	Created time.Time `json:"created"`
-	Public  bool      `json:"public"`
+	Name        string    `json:"name"`
+	Created     time.Time `json:"created"`
+	Public      bool      `json:"public"`
+	CORSOrigins []string  `json:"corsOrigins"` // sites whose pages may call this bucket
 }
 
 func toBucketJSON(b store.BucketInfo) bucketJSON {
-	return bucketJSON{Name: b.Name, Created: b.Created, Public: b.Public}
+	origins := b.CORSOrigins
+	if origins == nil {
+		origins = []string{}
+	}
+	return bucketJSON{Name: b.Name, Created: b.Created, Public: b.Public, CORSOrigins: origins}
 }
 
 func (a *api) createBucket(w http.ResponseWriter, r *http.Request) {

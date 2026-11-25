@@ -1,89 +1,117 @@
 package server
 
 import (
-	"log/slog"
+	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-func TestCORS(t *testing.T) {
-	const app = "https://app.example.com"
+// TestPerBucketCORS: each bucket lists the sites whose pages may call it.
+// app1's site may reach bucket1 from a browser but not bucket2.
+func TestPerBucketCORS(t *testing.T) {
+	a := newTestAPI(t)
+	const app1 = "https://app1.example.com"
+	for _, b := range []string{"bucket1", "bucket2", "open-b"} {
+		a.must(http.StatusCreated, "PUT", "/v1/buckets/"+b, a.admin, nil)
+		a.must(http.StatusOK, "PUT", "/v1/b/"+b+"/f.txt", a.admin, strings.NewReader("hi"))
+	}
+	rr := a.must(http.StatusOK, "PATCH", "/v1/buckets/bucket1", a.admin,
+		strings.NewReader(`{"corsOrigins": ["https://APP1.example.com", "http://localhost:3000"]}`))
+	var b bucketJSON
+	json.Unmarshal(rr.Body.Bytes(), &b)
+	if strings.Join(b.CORSOrigins, ",") != "http://localhost:3000,https://app1.example.com" {
+		t.Fatalf("stored origins = %v (want normalized and sorted)", b.CORSOrigins)
+	}
+	a.must(http.StatusOK, "PATCH", "/v1/buckets/open-b", a.admin, strings.NewReader(`{"corsOrigins": ["*"]}`))
+
+	preflight := func(path, origin string) []string {
+		return []string{"Origin", origin, "Access-Control-Request-Method", "PUT", "Access-Control-Request-Headers", "content-type, x-meta-owner"}
+	}
 	tests := []struct {
-		name        string
-		allowed     []string
-		method      string
-		origin      string
-		preflight   bool
-		wantStatus  int
-		wantACAO    string
-		wantExposed bool
+		name     string
+		method   string
+		path     string
+		hdr      []string
+		want     int
+		wantACAO string
 	}{
-		{"same-origin request untouched", []string{app}, "GET", "", false, 200, "", false},
-		{"allowed preflight", []string{app}, "OPTIONS", app, true, 204, app, false},
-		{"allowed real request", []string{app}, "GET", app, false, 200, app, true},
-		{"other origin preflight refused", []string{app}, "OPTIONS", "https://evil.example", true, 403, "", false},
-		{"other origin real request gets no CORS headers", []string{app}, "GET", "https://evil.example", false, 200, "", false},
-		{"port is part of the origin", []string{app}, "OPTIONS", app + ":8443", true, 403, "", false},
-		{"wildcard", []string{"*"}, "OPTIONS", "https://anything.example", true, 204, "*", false},
-		{"disabled by default", nil, "GET", app, false, 200, "", false},
+		{"preflight, listed site", "OPTIONS", "/v1/b/bucket1/up.pdf", preflight("", app1), 204, app1},
+		{"preflight, other bucket", "OPTIONS", "/v1/b/bucket2/up.pdf", preflight("", app1), 403, ""},
+		{"preflight, unlisted site", "OPTIONS", "/v1/b/bucket1/up.pdf", preflight("", "https://evil.example"), 403, ""},
+		{"preflight, missing bucket looks the same", "OPTIONS", "/v1/b/no-such-b/up.pdf", preflight("", app1), 403, ""},
+		{"preflight, wildcard bucket", "OPTIONS", "/v1/b/open-b/up.pdf", preflight("", "https://anyone.example"), 204, "*"},
+		{"real read, listed site", "GET", "/v1/b/bucket1/f.txt", []string{"Origin", app1}, 401, app1}, // no key: error still readable
+		{"real read, unlisted site gets no headers", "GET", "/v1/b/bucket2/f.txt", []string{"Origin", app1}, 401, ""},
+		{"listing a bucket", "OPTIONS", "/v1/b/bucket1", preflight("", app1), 204, app1},
+		{"no Origin: plain OPTIONS is not a method we serve", "OPTIONS", "/v1/b/bucket1/up.pdf", nil, 405, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := corsMiddleware(tt.allowed)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(200)
-			}))
-			r := httptest.NewRequest(tt.method, "/v1/b/bucket/key", nil)
-			if tt.origin != "" {
-				r.Header.Set("Origin", tt.origin)
+			rr := a.must(tt.want, tt.method, tt.path, "", nil, tt.hdr...)
+			h := rr.Header()
+			if got := h.Get("Access-Control-Allow-Origin"); got != tt.wantACAO {
+				t.Errorf("ACAO = %q, want %q", got, tt.wantACAO)
 			}
-			if tt.preflight {
-				r.Header.Set("Access-Control-Request-Method", "PUT")
-				r.Header.Set("Access-Control-Request-Headers", "content-type, x-meta-owner")
-			}
-			rr := httptest.NewRecorder()
-			h.ServeHTTP(rr, r)
-			got := rr.Header()
-			if rr.Code != tt.wantStatus || got.Get("Access-Control-Allow-Origin") != tt.wantACAO {
-				t.Fatalf("status %d, ACAO %q; want %d, %q", rr.Code, got.Get("Access-Control-Allow-Origin"), tt.wantStatus, tt.wantACAO)
-			}
-			if tt.wantStatus == 204 {
-				if !strings.Contains(got.Get("Access-Control-Allow-Methods"), "PUT") ||
-					got.Get("Access-Control-Allow-Headers") != "content-type, x-meta-owner" {
-					t.Errorf("preflight headers %v", got)
+			if tt.want == 204 {
+				if !strings.Contains(h.Get("Access-Control-Allow-Methods"), "PUT") ||
+					h.Get("Access-Control-Allow-Headers") != "content-type, x-meta-owner" {
+					t.Errorf("preflight headers %v", h)
 				}
 			}
-			if exposed := strings.Contains(got.Get("Access-Control-Expose-Headers"), "ETag"); exposed != tt.wantExposed {
-				t.Errorf("ETag exposed = %v, want %v", exposed, tt.wantExposed)
+			if tt.want == 403 {
+				if c := errCode(t, rr); c != CodeCORSNotAllowed {
+					t.Errorf("code = %s", c)
+				}
 			}
-			if tt.origin != "" && len(tt.allowed) > 0 && !strings.Contains(got.Get("Vary"), "Origin") {
-				t.Error("missing Vary: Origin (caches could serve one origin's answer to another)")
+			if len(tt.hdr) > 0 && !strings.Contains(h.Get("Vary"), "Origin") {
+				t.Error("missing Vary: Origin")
 			}
 		})
 	}
+
+	// With a key, an allowed page can read the ETag after uploading.
+	rr = a.must(http.StatusOK, "PUT", "/v1/b/bucket1/new.txt", a.admin, strings.NewReader("x"), "Origin", app1)
+	if !strings.Contains(rr.Header().Get("Access-Control-Expose-Headers"), "ETag") || rr.Header().Get("Access-Control-Allow-Origin") != app1 {
+		t.Errorf("upload response headers %v", rr.Header())
+	}
+
+	// Share links follow their file's bucket.
+	l1 := createLinkJSON(t, a, a.admin, "bucket1", "f.txt", 0, http.StatusCreated)
+	l2 := createLinkJSON(t, a, a.admin, "bucket2", "f.txt", 0, http.StatusCreated)
+	if got := a.must(http.StatusOK, "GET", linkPath(t, l1), "", nil, "Origin", app1).Header().Get("Access-Control-Allow-Origin"); got != app1 {
+		t.Errorf("share link in bucket1: ACAO %q", got)
+	}
+	if got := a.must(http.StatusOK, "GET", linkPath(t, l2), "", nil, "Origin", app1).Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("share link in bucket2: ACAO %q", got)
+	}
+	a.must(http.StatusNoContent, "OPTIONS", linkPath(t, l1), "", nil, "Origin", app1, "Access-Control-Request-Method", "GET")
+
+	// Changing the list applies at once; clearing it closes access.
+	a.must(http.StatusOK, "PATCH", "/v1/buckets/bucket1", a.admin, strings.NewReader(`{"corsOrigins": []}`))
+	a.must(http.StatusForbidden, "OPTIONS", "/v1/b/bucket1/up.pdf", "", nil, preflight("", app1)...)
 }
 
-// Through the full stack: a preflight for a presigned PUT is answered
-// before authentication, and error replies stay readable by the page.
-func TestCORSFullStack(t *testing.T) {
-	base := newTestAPI(t)
-	a := &testAPI{t: t, eng: base.eng, auth: base.auth, admin: base.admin, h: New(Options{
-		Logger: slog.New(slog.DiscardHandler), MaxObjectSize: 1 << 20,
-		Store: base.eng, Buckets: base.eng, Auth: base.auth, Links: base.eng,
-		CORSAllowedOrigins: []string{"https://app.example.com"},
-	})}
-	rr := a.must(http.StatusNoContent, "OPTIONS", "/v1/b/some-bucket/upload.pdf", "", nil,
-		"Origin", "https://app.example.com", "Access-Control-Request-Method", "PUT")
-	if rr.Header().Get("Access-Control-Allow-Origin") != "https://app.example.com" {
-		t.Errorf("preflight headers %v", rr.Header())
+func TestBucketCORSSettingsAccess(t *testing.T) {
+	a := newTestAPI(t)
+	a.must(http.StatusCreated, "PUT", "/v1/buckets/set-b", a.admin, nil)
+	body := `{"corsOrigins": ["https://app.example.com"]}`
+	a.must(http.StatusForbidden, "PATCH", "/v1/buckets/set-b", a.key("set-b:rw"), strings.NewReader(body))
+	a.must(http.StatusOK, "PATCH", "/v1/buckets/set-b", a.key("set-b:admin"), strings.NewReader(body))
+	for _, bad := range []string{`{"corsOrigins": ["app.example.com"]}`, `{"corsOrigins": ["https://a.com/path"]}`} {
+		if c := errCode(t, a.must(http.StatusBadRequest, "PATCH", "/v1/buckets/set-b", a.admin, strings.NewReader(bad))); c != CodeInvalidOrigin {
+			t.Errorf("%s: code %s", bad, c)
+		}
 	}
-	rr = a.must(http.StatusUnauthorized, "GET", "/v1/buckets", "", nil, "Origin", "https://app.example.com")
-	if rr.Header().Get("Access-Control-Allow-Origin") == "" {
-		t.Error("error reply not readable by the allowed page")
+	// Both settings in one request, and neither clobbers the other.
+	rr := a.must(http.StatusOK, "PATCH", "/v1/buckets/set-b", a.admin, strings.NewReader(`{"public": true}`))
+	var b bucketJSON
+	json.Unmarshal(rr.Body.Bytes(), &b)
+	if !b.Public || len(b.CORSOrigins) != 1 {
+		t.Errorf("after setting public: %+v", b)
 	}
-	if c := errCode(t, a.must(http.StatusForbidden, "OPTIONS", "/v1/b/some-bucket/x", "", nil,
-		"Origin", "https://evil.example", "Access-Control-Request-Method", "PUT")); c != CodeCORSNotAllowed {
-		t.Errorf("code = %s", c)
+	rr = a.must(http.StatusOK, "GET", "/v1/buckets", a.admin, nil)
+	if !strings.Contains(rr.Body.String(), `"corsOrigins":["https://app.example.com"]`) {
+		t.Errorf("bucket list: %s", rr.Body)
 	}
 }

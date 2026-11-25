@@ -89,8 +89,13 @@ type Engine struct {
 }
 
 type bucketRecord struct {
-	Created time.Time `json:"created"`
-	Public  bool      `json:"public,omitempty"`
+	Created     time.Time `json:"created"`
+	Public      bool      `json:"public,omitempty"`
+	CORSOrigins []string  `json:"cors,omitempty"`
+}
+
+func (r bucketRecord) info(name string) store.BucketInfo {
+	return store.BucketInfo{Name: name, Created: r.Created, Public: r.Public, CORSOrigins: r.CORSOrigins}
 }
 
 type objectRecord struct {

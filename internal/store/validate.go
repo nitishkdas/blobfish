@@ -2,6 +2,8 @@ package store
 
 import (
 	"fmt"
+	"net/url"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -92,4 +94,35 @@ func (r Range) Resolve(size int64) (off, n int64, err error) {
 		return 0, 0, fmt.Errorf("%w: end %d before start %d", ErrInvalidRange, r.End, r.Start)
 	}
 	return r.Start, end - r.Start + 1, nil
+}
+
+// MaxCORSOrigins caps the sites allowed per bucket.
+const MaxCORSOrigins = 20
+
+// NormalizeCORSOrigins validates web origins and returns them lower-cased,
+// de-duplicated and sorted. Each is "*" or exactly scheme://host[:port],
+// which is what browsers send in the Origin header: no path, no slash.
+func NormalizeCORSOrigins(in []string) ([]string, error) {
+	out := []string{}
+	for _, o := range in {
+		o = strings.ToLower(strings.TrimSpace(o))
+		if o == "" {
+			continue
+		}
+		if o != "*" {
+			u, err := url.Parse(o)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+				u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil || u.Opaque != "" {
+				return nil, fmt.Errorf("%w: %q must look like https://app.example.com (no path or trailing slash), or *", ErrInvalidOrigin, o)
+			}
+		}
+		if !slices.Contains(out, o) {
+			out = append(out, o)
+		}
+	}
+	if len(out) > MaxCORSOrigins {
+		return nil, fmt.Errorf("%w: at most %d origins per bucket", ErrInvalidOrigin, MaxCORSOrigins)
+	}
+	slices.Sort(out)
+	return out, nil
 }

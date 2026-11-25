@@ -91,6 +91,7 @@ export function renderFiles() {
       renderCrumbs(),
       isPublic && h("span", { class: "chip public-chip", title: "Files in this bucket can be read without a key" },
         icon("globe", 14), "Public"),
+      corsChip(r.bucket),
       h("div", { class: "toolbar-actions" },
         canWrite && h("button", { class: "with-icon", onclick: newFolder }, icon("folderPlus"), "New folder"),
         canWrite && h("button", { class: "with-icon", onclick: () => pickAndUpload({ folder: true }) }, icon("folder"), "Upload folder"),
@@ -98,6 +99,10 @@ export function renderFiles() {
         can("admin", r.bucket) && !r.prefix && h("button", {
           class: "link", onclick: () => setVisibility(!isPublic),
         }, isPublic ? "Make private" : "Make public"),
+        can("admin", r.bucket) && !r.prefix && h("button", {
+          class: "link", onclick: () => editBrowserAccess(r.bucket),
+          title: "Websites whose pages may upload to and download from this bucket directly",
+        }, "Browser access"),
         can("admin", r.bucket) && !r.prefix && h("button", {
           class: "link danger", onclick: deleteBucket, title: "Only empty buckets can be deleted",
         }, "Delete bucket"))),
@@ -299,6 +304,75 @@ async function share(o) {
   list.replaceChildren(h("li", { class: "muted share-none" }, "Loading…"));
   dialog.showModal();
   await load();
+}
+
+function corsChip(bucket) {
+  const origins = bucketInfo(bucket)?.corsOrigins || [];
+  if (origins.length === 0) return null;
+  const label = origins.includes("*") ? "Browser: any site" : `Browser: ${origins.length} site${origins.length === 1 ? "" : "s"}`;
+  return h("span", { class: "chip cors-chip", title: `Web pages on these sites may call this bucket:\n${origins.join("\n")}` },
+    icon("globe", 14), label);
+}
+
+// originOf returns the exact origin a browser would send for what the user
+// typed, or an error message. "*" means any site.
+function originOf(input) {
+  const v = input.trim().toLowerCase();
+  if (v === "*") return { origin: "*" };
+  let u;
+  try { u = new URL(v); } catch { return { error: "Enter a full address like https://app.example.com." }; }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return { error: "Only http:// and https:// sites can be added." };
+  if (v.replace(/\/$/, "") !== u.origin || u.username || u.search || u.hash) {
+    return { error: `Use just the site, without a path: ${u.origin}` };
+  }
+  return { origin: u.origin };
+}
+
+// editBrowserAccess edits which websites' pages may call this bucket from a
+// browser, e.g. to upload straight to a presigned URL from your app.
+async function editBrowserAccess(bucket) {
+  const dialog = document.getElementById("cors");
+  const list = document.getElementById("cors-list");
+  const input = document.getElementById("cors-input");
+  const error = document.getElementById("cors-error");
+  const warn = document.getElementById("cors-warn");
+  let origins = [...(bucketInfo(bucket)?.corsOrigins || [])];
+
+  document.getElementById("cors-title").textContent = `Browser access to “${bucket}”`;
+  const render = () => {
+    list.replaceChildren(...(origins.length
+      ? origins.map((o) => h("li", {},
+        h("span", { class: "mono" }, o === "*" ? "* (any website)" : o),
+        iconButton("close", `Remove ${o}`, () => { origins = origins.filter((x) => x !== o); render(); })))
+      : [h("li", { class: "muted" }, "No websites: pages on other sites can't call this bucket.")]));
+    warn.hidden = !origins.includes("*");
+  };
+  const add = () => {
+    const { origin, error: problem } = originOf(input.value);
+    error.textContent = problem || "";
+    if (!origin) return;
+    if (!origins.includes(origin)) origins = [...origins, origin].sort();
+    input.value = "";
+    render();
+    input.focus();
+  };
+  document.getElementById("cors-add").onclick = add;
+  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+  document.getElementById("cors-save").onclick = async () => {
+    if (input.value.trim()) { add(); if (error.textContent) return; } // typed but not added yet
+    try {
+      await api("PATCH", `/v1/buckets/${encodeURIComponent(bucket)}`, { body: { corsOrigins: origins } });
+      state.buckets = (await api("GET", "/v1/buckets")).buckets;
+      dialog.close();
+      toast(origins.length ? `Browser access saved for ${bucket}` : `Browser access turned off for ${bucket}`);
+      ui.renderApp();
+    } catch (err) { showError(err); }
+  };
+  input.value = "";
+  error.textContent = "";
+  render();
+  dialog.showModal();
+  input.focus();
 }
 
 async function setVisibility(makePublic) {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -113,5 +114,27 @@ func TestRangeResolve(t *testing.T) {
 				t.Errorf("Resolve() = (%d, %d), want (%d, %d)", off, n, tt.wantOff, tt.wantN)
 			}
 		})
+	}
+}
+
+func TestNormalizeCORSOrigins(t *testing.T) {
+	got, err := NormalizeCORSOrigins([]string{" https://App.Example.com ", "http://localhost:3000", "https://app.example.com", ""})
+	if err != nil || strings.Join(got, ",") != "http://localhost:3000,https://app.example.com" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if got, err := NormalizeCORSOrigins(nil); err != nil || got == nil || len(got) != 0 {
+		t.Errorf("empty list: %v, %v", got, err)
+	}
+	for _, bad := range []string{"app.example.com", "https://app.example.com/", "https://a.com/x", "ftp://a.com", "https://a.com?x=1", "https://u:p@a.com", "mailto:a@b.c"} {
+		if _, err := NormalizeCORSOrigins([]string{bad}); !errors.Is(err, ErrInvalidOrigin) {
+			t.Errorf("%q accepted: %v", bad, err)
+		}
+	}
+	many := make([]string, MaxCORSOrigins+1)
+	for i := range many {
+		many[i] = fmt.Sprintf("https://site%d.example", i)
+	}
+	if _, err := NormalizeCORSOrigins(many); !errors.Is(err, ErrInvalidOrigin) {
+		t.Errorf("too many origins accepted: %v", err)
 	}
 }

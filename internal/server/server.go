@@ -23,9 +23,6 @@ type Options struct {
 	// TrustedProxies are reverse proxies whose X-Forwarded-For and
 	// X-Forwarded-Proto headers are believed.
 	TrustedProxies []netip.Prefix
-	// CORSAllowedOrigins are web origins ("https://app.example.com", or
-	// "*") whose pages may call BlobFish from the browser.
-	CORSAllowedOrigins []string
 	// IdleTimeout drops a body transfer that makes no progress for this
 	// long. Zero disables it (tests only).
 	IdleTimeout time.Duration
@@ -93,6 +90,8 @@ func New(opts Options) http.Handler {
 	// makes the URL readable and is ignored.
 	mux.HandleFunc("GET /s/{token}", a.serveLink)
 	mux.HandleFunc("GET /s/{token}/{name...}", a.serveLink)
+	mux.HandleFunc("OPTIONS /s/{token}", a.serveLink)
+	mux.HandleFunc("OPTIONS /s/{token}/{name...}", a.serveLink)
 	mux.HandleFunc("POST /v1/presign", a.presign)
 	mux.HandleFunc("GET /v1/keys", a.listKeys)
 	mux.HandleFunc("POST /v1/keys", a.createKey)
@@ -120,7 +119,6 @@ func New(opts Options) http.Handler {
 		requestIDMiddleware,
 		clientIPMiddleware(opts.TrustedProxies),
 		logMiddleware(opts.Logger, a.stats),
-		corsMiddleware(opts.CORSAllowedOrigins),
 		recoverMiddleware(opts.Logger),
 		maxBodyMiddleware(opts.MaxObjectSize),
 		idleTimeoutMiddleware(opts.IdleTimeout),
