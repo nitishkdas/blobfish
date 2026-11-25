@@ -42,6 +42,14 @@ func main() {
 
 // run is main without process-global side effects, so it can be tested.
 func run(ctx context.Context, args []string, getenv func(string) string, stdout, stderr io.Writer) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "backup":
+			return runBackup(ctx, args[1:], getenv, stdout, stderr)
+		case "restore":
+			return runRestore(ctx, args[1:], getenv, stdout, stderr)
+		}
+	}
 	fs := flag.NewFlagSet("blobfish", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", getenv("BLOBFISH_CONFIG"), "path to JSON config file (env BLOBFISH_CONFIG)")
@@ -114,6 +122,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			Buckets:       eng,
 			Auth:          authSvc,
 			Links:         eng,
+			Backup:        eng,
 			PublicURL:     cfg.PublicURL,
 		}),
 		// Headers get a fixed limit. Bodies can be multi-GB streams on slow

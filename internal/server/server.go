@@ -26,6 +26,7 @@ type Options struct {
 	Buckets     store.Buckets
 	Auth        *auth.Service
 	Links       store.Links
+	Backup      store.Backuper
 	// PublicURL is the base for presigned URLs; empty means "use the Host
 	// header of the presign request".
 	PublicURL string
@@ -38,6 +39,7 @@ type api struct {
 	buckets   store.Buckets
 	auth      *auth.Service
 	links     store.Links
+	backuper  store.Backuper
 	publicURL string
 	maxObject int64
 }
@@ -50,6 +52,7 @@ func New(opts Options) http.Handler {
 		buckets:   opts.Buckets,
 		auth:      opts.Auth,
 		links:     opts.Links,
+		backuper:  opts.Backup,
 		publicURL: strings.TrimSuffix(opts.PublicURL, "/"),
 		maxObject: opts.MaxObjectSize,
 	}
@@ -57,6 +60,7 @@ func New(opts Options) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /v1/whoami", a.whoami)
+	mux.HandleFunc("GET /v1/backup", a.backup)
 	mux.HandleFunc("GET /v1/buckets", a.listBuckets)
 	mux.HandleFunc("PUT /v1/buckets/{bucket}", a.createBucket)
 	mux.HandleFunc("DELETE /v1/buckets/{bucket}", a.deleteBucket)

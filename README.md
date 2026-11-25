@@ -61,6 +61,27 @@ Scopes are `<bucket>:<r|w|rw|admin>`, with `*` for every bucket. Creating
 buckets and managing keys needs `*:admin`. Errors always look like
 `{"error":{"code":"NoSuchKey","message":"...","requestId":"..."}}`.
 
+## Backups
+
+BlobFish runs on one machine, so backups are your only second copy. A backup
+is one `.tar` file: a consistent snapshot of the metadata and every file,
+taken while the server keeps serving.
+
+```sh
+# Server running: download a backup with an admin key
+curl -H "Authorization: Bearer bf_..." http://localhost:8080/v1/backup -o backup.tar
+
+# Server stopped: back up the data dir directly
+./blobfish backup -o backup.tar
+
+# Restore into a new, empty folder; every file is checked against its
+# SHA-256, so this is also how you verify a backup
+./blobfish restore -from backup.tar -data-dir /srv/blobfish-restored
+```
+
+Backups contain API key hashes and share-link tokens (so keys and links keep
+working after a restore): store them as carefully as the data itself.
+
 ## Configuration
 
 Settings come from built-in defaults, then an optional JSON file

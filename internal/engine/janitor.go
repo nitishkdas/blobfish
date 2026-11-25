@@ -101,7 +101,7 @@ func (e *Engine) RunJanitor(ctx context.Context) (JanitorStats, error) {
 // tracked, any commit has already happened, and the index read that follows
 // sees it.
 func (e *Engine) isOrphan(id string) (bool, error) {
-	if e.tracked(id) {
+	if e.tracked(id) || e.backupRunning() {
 		return false, nil
 	}
 	var known bool
@@ -142,4 +142,13 @@ func (e *Engine) JanitorLoop(ctx context.Context, interval time.Duration) {
 			}
 		}
 	}
+}
+
+// backupRunning reports whether a backup is copying blobs right now; the
+// janitor must not delete then, since a blob unreferenced a moment ago may
+// still be in the backup's snapshot.
+func (e *Engine) backupRunning() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.backups > 0
 }

@@ -77,6 +77,10 @@ type Engine struct {
 	// but has not committed yet. The janitor skips them.
 	mu       sync.Mutex
 	inflight map[string]struct{}
+	// backups counts running backups; while > 0, blob removals are queued
+	// in deferredRemovals and the janitor deletes nothing (see backup.go).
+	backups          int
+	deferredRemovals []string
 
 	// crash, when set by a test, is called at each named step of a write.
 	// Returning true makes the write stop dead, skipping all cleanup, as if
@@ -225,6 +229,13 @@ func (e *Engine) blobPath(id string) string {
 // logged, not returned: the metadata change already committed, and the
 // janitor will retry.
 func (e *Engine) removeBlob(id string) {
+	e.mu.Lock()
+	if e.backups > 0 {
+		e.deferredRemovals = append(e.deferredRemovals, id)
+		e.mu.Unlock()
+		return
+	}
+	e.mu.Unlock()
 	if err := os.Remove(e.blobPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		e.log.Warn("could not remove unreferenced blob; janitor will retry", "blob", id, "err", err)
 	}

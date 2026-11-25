@@ -70,6 +70,12 @@ type LinkRecord struct {
 	CreatedByName string    `json:"createdByName"` // its name at the time
 }
 
+// Backuper writes a consistent snapshot of everything (metadata and every
+// referenced object) to w, without stopping reads or writes.
+type Backuper interface {
+	Backup(ctx context.Context, w io.Writer) error
+}
+
 // Keys persists API key records. Only the SHA-256 hash of a token is ever
 // stored; the token itself is shown to its creator once and then forgotten.
 type Keys interface {

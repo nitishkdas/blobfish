@@ -820,3 +820,33 @@ func TestInsufficientStorageIs507(t *testing.T) {
 		t.Errorf("message should explain the reserve: %s", rr.Body)
 	}
 }
+
+func TestBackupEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	eng, err := engine.Open(dir, engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	svc := auth.NewService(eng, eng.PresignSecret())
+	admin, _ := svc.EnsureAdminKey(context.Background())
+	a := &testAPI{t: t, auth: svc, eng: eng, admin: admin, h: New(Options{
+		Logger: slog.New(slog.DiscardHandler), MaxObjectSize: 1 << 20,
+		Store: eng, Buckets: eng, Auth: svc, Links: eng, Backup: eng,
+	})}
+	a.must(http.StatusCreated, "PUT", "/v1/buckets/bk-b", admin, nil)
+	a.must(http.StatusOK, "PUT", "/v1/b/bk-b/a/b.txt", admin, strings.NewReader("backed up"))
+
+	a.must(http.StatusUnauthorized, "GET", "/v1/backup", "", nil)
+	a.must(http.StatusForbidden, "GET", "/v1/backup", a.key("bk-b:admin"), nil) // bucket admin isn't enough
+	rr := a.must(http.StatusOK, "GET", "/v1/backup", admin, nil)
+	h := rr.Header()
+	if h.Get("Content-Type") != "application/x-tar" || !strings.Contains(h.Get("Content-Disposition"), "blobfish-backup-") ||
+		h.Get("Cache-Control") != "no-store" {
+		t.Errorf("headers %v", h)
+	}
+	st, err := engine.Restore(context.Background(), rr.Body, filepath.Join(t.TempDir(), "r"), engine.Options{})
+	if err != nil || st.Objects != 1 {
+		t.Fatalf("restore of downloaded backup: %+v %v", st, err)
+	}
+}
