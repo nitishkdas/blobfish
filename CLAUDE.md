@@ -168,7 +168,7 @@ CI (`.github/workflows/ci.yml`) runs gofmt, vet, race tests, then builds linux a
 - `internal/engine` – the implementation. bbolt buckets: `buckets` (name→record), `objects/<bucket>` (nested; key→JSON record with blob ID), `blobs` (index of committed blob IDs). A blob file not in `blobs` is an orphan; the janitor deletes it (at `Open` and hourly). Running Puts register tmp names/blob IDs in `inflight` so the janitor skips them; keep "track before rename, untrack after commit".
 - Crash tests: `e.crash` hook stops a write dead at named points (`put:written|synced|renamed|committed`, `delete:committed`); `TestCrashPoints` reopens and checks old-or-new + no orphans. `TestKill9DuringWrites` SIGKILLs a child process (`TestCrashChild`) mid-write; skipped with `-short`. New write-path steps need a new crash point and table row.
 - Request IDs are ULIDs generated server-side (client IDs ignored), returned in `X-Request-Id` and in error bodies.
-- `http.Server` has only `ReadHeaderTimeout`/`IdleTimeout`; no Read/Write timeouts because bodies are multi-GB streams.
+- `http.Server` has only `ReadHeaderTimeout`/`IdleTimeout`; no Read/Write timeouts because bodies are multi-GB streams. Instead `idleTimeoutMiddleware` (`internal/server/idle.go`) pushes the conn's read/write deadline forward on every body read and response write (`transfer_idle_timeout`, default 60s), so only transfers that stop making progress are dropped; a broken upload sets `Connection: close` (else net/http would wait forever discarding the unread body). A stalled upload is 408 `RequestTimeout`, not a logged 500. `LimitListener` caps open connections (`max_connections`, default 1000). `idle_test.go` covers this over real TCP.
 
 ## Engineering rules
 

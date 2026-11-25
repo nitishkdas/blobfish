@@ -103,19 +103,23 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+	ln = server.LimitListener(ln, cfg.MaxConnections)
 
 	srv := &http.Server{
 		Handler: server.New(server.Options{
 			Logger:        log,
 			MaxObjectSize: cfg.MaxObjectSize,
+			IdleTimeout:   time.Duration(cfg.TransferIdleTimeout),
 			Store:         eng,
 			Buckets:       eng,
 			Auth:          authSvc,
 			Links:         eng,
 			PublicURL:     cfg.PublicURL,
 		}),
-		// Only the header read is bounded. Bodies can be multi-GB streams on
-		// slow links, so there is deliberately no ReadTimeout/WriteTimeout.
+		// Headers get a fixed limit. Bodies can be multi-GB streams on slow
+		// links, so instead of ReadTimeout/WriteTimeout (which bound the whole
+		// request) the server drops transfers only when they stop making
+		// progress (server.Options.IdleTimeout).
 		ReadHeaderTimeout: 10 * time.Second,
 		MaxHeaderBytes:    64 << 10, // ample for X-Meta-* (capped at 2 KB of values)
 		IdleTimeout:       120 * time.Second,

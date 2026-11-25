@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func envMap(m map[string]string) func(string) string {
@@ -67,6 +68,20 @@ func TestLoad(t *testing.T) {
 			env:  map[string]string{"BLOBFISH_PUBLIC_URL": "https://files.example.com"},
 			want: func(c Config) Config { c.PublicURL = "https://files.example.com"; return c },
 		},
+		{
+			name: "transfer limits from file and env",
+			file: `{"transfer_idle_timeout": "2m", "max_connections": 50}`,
+			env:  map[string]string{"BLOBFISH_MAX_CONNECTIONS": "75"},
+			want: func(c Config) Config {
+				c.TransferIdleTimeout, c.MaxConnections = Duration(2*time.Minute), 75
+				return c
+			},
+		},
+		{name: "idle timeout env", env: map[string]string{"BLOBFISH_TRANSFER_IDLE_TIMEOUT": "90s"},
+			want: func(c Config) Config { c.TransferIdleTimeout = Duration(90 * time.Second); return c }},
+		{name: "idle timeout bad", file: `{"transfer_idle_timeout": "soon"}`, wantErr: "invalid duration"},
+		{name: "idle timeout too small", file: `{"transfer_idle_timeout": "10ms"}`, wantErr: "transfer_idle_timeout"},
+		{name: "zero connections", env: map[string]string{"BLOBFISH_MAX_CONNECTIONS": "0"}, wantErr: "max_connections"},
 		{name: "public url no scheme", file: `{"public_url": "files.example.com"}`, wantErr: "public_url"},
 		{name: "public url with path", file: `{"public_url": "https://x.com/sub"}`, wantErr: "public_url"},
 	}

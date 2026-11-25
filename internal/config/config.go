@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config is the full server configuration.
@@ -34,7 +35,32 @@ type Config struct {
 	// "https://files.example.com". Used to build presigned URLs. When empty,
 	// the request's Host header is used.
 	PublicURL string `json:"public_url"`
+	// TransferIdleTimeout drops a connection whose body upload or download
+	// makes no progress for this long (e.g. "60s"). The timer restarts on
+	// every chunk, so long transfers that keep moving are never cut off.
+	TransferIdleTimeout Duration `json:"transfer_idle_timeout"`
+	// MaxConnections caps simultaneously open client connections; extra
+	// clients wait in the kernel's accept queue instead of exhausting
+	// memory or file handles.
+	MaxConnections int `json:"max_connections"`
 }
+
+// Duration is a time.Duration written as a string like "60s" or "2m" in
+// the JSON config.
+type Duration time.Duration
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (d *Duration) UnmarshalText(b []byte) error {
+	v, err := time.ParseDuration(string(b))
+	if err != nil {
+		return err
+	}
+	*d = Duration(v)
+	return nil
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (d Duration) MarshalText() ([]byte, error) { return []byte(time.Duration(d).String()), nil }
 
 // Default returns the built-in configuration.
 func Default() Config {
@@ -44,6 +70,9 @@ func Default() Config {
 		MaxObjectSize: 5 << 30, // 5 GiB
 		LogLevel:      "info",
 		LogFormat:     "text",
+
+		TransferIdleTimeout: Duration(60 * time.Second),
+		MaxConnections:      1000,
 	}
 }
 
@@ -112,6 +141,18 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	if v := getenv("BLOBFISH_PUBLIC_URL"); v != "" {
 		cfg.PublicURL = v
 	}
+	if v := getenv("BLOBFISH_TRANSFER_IDLE_TIMEOUT"); v != "" {
+		if err := cfg.TransferIdleTimeout.UnmarshalText([]byte(v)); err != nil {
+			return fmt.Errorf("BLOBFISH_TRANSFER_IDLE_TIMEOUT: %w", err)
+		}
+	}
+	if v := getenv("BLOBFISH_MAX_CONNECTIONS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("BLOBFISH_MAX_CONNECTIONS: %w", err)
+		}
+		cfg.MaxConnections = n
+	}
 	return nil
 }
 
@@ -133,6 +174,12 @@ func (c Config) Validate() error {
 	case "text", "json":
 	default:
 		return fmt.Errorf("config: log_format must be text or json, got %q", c.LogFormat)
+	}
+	if time.Duration(c.TransferIdleTimeout) < time.Second {
+		return fmt.Errorf("config: transfer_idle_timeout must be at least 1s, got %s", time.Duration(c.TransferIdleTimeout))
+	}
+	if c.MaxConnections < 1 {
+		return fmt.Errorf("config: max_connections must be at least 1, got %d", c.MaxConnections)
 	}
 	if c.PublicURL != "" {
 		u, err := url.Parse(c.PublicURL)

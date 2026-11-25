@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"syscall"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
@@ -40,6 +41,7 @@ const (
 	CodeIncompleteBody    = "IncompleteBody"
 	CodeNoSuchLink        = "NoSuchLink"
 	CodeLinkExpired       = "LinkExpired"
+	CodeRequestTimeout    = "RequestTimeout"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This
@@ -76,6 +78,9 @@ var errorMapping = []struct {
 	// discarded the partial data; this is not a server failure.
 	{io.ErrUnexpectedEOF, http.StatusBadRequest, CodeIncompleteBody},
 	{syscall.ECONNRESET, http.StatusBadRequest, CodeIncompleteBody},
+	// The client stopped sending mid-upload for longer than the transfer
+	// idle timeout. Its fault, not ours: no ERROR log line.
+	{os.ErrDeadlineExceeded, http.StatusRequestTimeout, CodeRequestTimeout},
 }
 
 var (

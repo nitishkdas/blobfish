@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
 	"github.com/nitishkdas/blobfish/internal/store"
@@ -18,10 +19,13 @@ import (
 type Options struct {
 	Logger        *slog.Logger
 	MaxObjectSize int64
-	Store         store.Store
-	Buckets       store.Buckets
-	Auth          *auth.Service
-	Links         store.Links
+	// IdleTimeout drops a body transfer that makes no progress for this
+	// long. Zero disables it (tests only).
+	IdleTimeout time.Duration
+	Store       store.Store
+	Buckets     store.Buckets
+	Auth        *auth.Service
+	Links       store.Links
 	// PublicURL is the base for presigned URLs; empty means "use the Host
 	// header of the presign request".
 	PublicURL string
@@ -86,12 +90,13 @@ func New(opts Options) http.Handler {
 	})
 
 	// Outermost first: every request gets an ID, then a log line, then panic
-	// protection, then the body limit.
+	// protection, then the body limit, then the no-progress timeout.
 	return chain(root,
 		requestIDMiddleware,
 		logMiddleware(opts.Logger),
 		recoverMiddleware(opts.Logger),
 		maxBodyMiddleware(opts.MaxObjectSize),
+		idleTimeoutMiddleware(opts.IdleTimeout),
 	)
 }
 
