@@ -133,11 +133,26 @@ td.when { white-space: nowrap; color: var(--muted); }
 td.actions { text-align: right; white-space: nowrap; }
 .more { margin-top: 12px; }
 
-.uploads { margin-bottom: 12px; display: grid; gap: 6px; }
-.upload { display: grid; grid-template-columns: 1fr 140px auto; gap: 10px; align-items: center; font-size: 13px; }
-.upload .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.upload progress { width: 100%; accent-color: var(--accent); }
-.upload.failed .state { color: var(--danger); }
+/* Icon buttons */
+.icon-btn {
+  display: inline-grid; place-items: center;
+  width: 30px; height: 30px; padding: 0;
+  border: 0; background: none; border-radius: 6px;
+  color: var(--muted);
+}
+.icon-btn:hover { background: var(--row-hover); color: var(--text); }
+.icon-btn.danger:hover { color: var(--danger); }
+.icon-btn.flip svg { transition: transform .15s; }
+.upload-panel.collapsed .icon-btn.flip svg { transform: rotate(180deg); }
+td.actions { padding-top: 4px; padding-bottom: 4px; }
+th.actions { text-align: right; }
+td.actions .icon-btn { opacity: .75; }
+tbody tr:hover td.actions .icon-btn, td.actions .icon-btn:focus-visible { opacity: 1; }
+button.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
 
 dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text); padding: 0; width: min(520px, calc(100% - 32px)); }
 dialog::backdrop { background: rgb(0 0 0 / .35); }
@@ -146,7 +161,57 @@ dialog::backdrop { background: rgb(0 0 0 / .35); }
 .dialog p { margin: 0; }
 #share-url { width: 100%; }
 
-#toasts { position: fixed; bottom: 16px; right: 16px; display: grid; gap: 8px; z-index: 10; }
+/* Bottom-right dock: upload panel above toasts */
+.dock {
+  position: fixed; bottom: 16px; right: 16px; z-index: 10;
+  display: grid; gap: 8px; justify-items: end;
+  width: min(360px, calc(100vw - 32px));
+}
+#toasts { display: grid; gap: 8px; justify-items: end; }
+
+.upload-panel {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / .14);
+  overflow: hidden;
+}
+.upload-panel header {
+  display: flex; align-items: center; gap: 2px;
+  padding: 6px 6px 6px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.upload-panel.collapsed header { border-bottom: 0; }
+.upload-panel header strong { flex: 1; font-size: 13px; }
+.upload-panel ul { list-style: none; margin: 0; padding: 4px 0; max-height: 280px; overflow: auto; }
+.job {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px;
+  padding: 6px 6px 6px 14px;
+}
+.job.done { animation: fade-out .6s ease 1.9s forwards; }
+.job-text { display: grid; min-width: 0; }
+.job-name, .job-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-name { font-size: 13px; }
+.job-sub { font-size: 12px; color: var(--muted); }
+.job.failed .job-sub { color: var(--danger); }
+.job-status { display: flex; align-items: center; gap: 2px; }
+.job-status .pct { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+.job-status .ok { color: var(--accent); display: inline-grid; place-items: center; width: 30px; }
+.job-status .bad { color: var(--danger); display: inline-grid; place-items: center; width: 30px; }
+.job progress {
+  grid-column: 1 / -1; width: 100%; height: 4px;
+  appearance: none; border: 0; border-radius: 2px; overflow: hidden;
+  background: var(--line); accent-color: var(--accent);
+}
+.job progress::-webkit-progress-bar { background: var(--line); }
+.job progress::-webkit-progress-value { background: var(--accent); }
+.job progress::-moz-progress-bar { background: var(--accent); }
+@keyframes fade-out { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .job.done { animation: none; }
+  .icon-btn.flip svg { transition: none; }
+}
 .toast {
   background: var(--text); color: var(--bg);
   padding: 10px 14px; border-radius: var(--radius); max-width: 420px;

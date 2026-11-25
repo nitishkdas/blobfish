@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"syscall"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
 	"github.com/nitishkdas/blobfish/internal/store"
@@ -35,6 +37,7 @@ const (
 	CodeNoSuchAPIKey      = "NoSuchAPIKey"
 	CodeInvalidScope      = "InvalidScope"
 	CodeLastAdminKey      = "LastAdminKey"
+	CodeIncompleteBody    = "IncompleteBody"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This
@@ -65,6 +68,10 @@ var errorMapping = []struct {
 	{errAccessDenied, http.StatusForbidden, CodeAccessDenied},
 	{errBadRequest, http.StatusBadRequest, CodeInvalidRequest},
 	{context.Canceled, http.StatusBadRequest, CodeInvalidRequest},
+	// The client hung up or cancelled mid-upload. The engine has already
+	// discarded the partial data; this is not a server failure.
+	{io.ErrUnexpectedEOF, http.StatusBadRequest, CodeIncompleteBody},
+	{syscall.ECONNRESET, http.StatusBadRequest, CodeIncompleteBody},
 }
 
 var (

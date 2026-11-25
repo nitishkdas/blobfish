@@ -13,8 +13,12 @@ const state = {
   folders: [],
   files: [],
   cursor: "",
+  // Upload queue, shown in the docked panel. Jobs run one at a time and
+  // remember their own bucket, so browsing elsewhere doesn't disturb them.
   uploads: [],
+  uploadsCollapsed: false,
 };
+let nextUploadId = 1;
 
 // ---------- DOM helpers ----------
 
@@ -31,6 +35,39 @@ function h(tag, attrs = {}, ...children) {
     el.append(c instanceof Node ? c : String(c));
   }
   return el;
+}
+
+// Simple stroked 24×24 icons, drawn for BlobFish.
+const ICONS = {
+  download: ["M12 4v11", "M7 10l5 5 5-5", "M5 20h14"],
+  upload: ["M12 16V5", "M7 10l5-5 5 5", "M5 20h14"],
+  share: ["M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1", "M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"],
+  trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13", "M10 11v6", "M14 11v6"],
+  close: ["M6 6l12 12", "M18 6L6 18"],
+  chevron: ["M6 9l6 6 6-6"],
+  check: ["M5 12.5l4.5 4.5L19 7"],
+  alert: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18", "M12 7.5v5.5", "M12 16.5v.01"],
+  retry: ["M4 12a8 8 0 1 0 2.35-5.65", "M4 4v4.5h4.5"],
+};
+
+function icon(name) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  for (const [k, v] of Object.entries({
+    viewBox: "0 0 24 24", width: 18, height: 18, fill: "none", stroke: "currentColor",
+    "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true",
+  })) svg.setAttribute(k, v);
+  for (const d of ICONS[name]) {
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+// iconButton is a square button whose label lives in aria-label and title.
+function iconButton(name, label, onclick, extraClass = "") {
+  return h("button", { class: `icon-btn ${extraClass}`.trim(), type: "button", "aria-label": label, title: label, onclick }, icon(name));
 }
 
 function toast(message, { error = false, detail = "" } = {}) {
@@ -157,6 +194,9 @@ function renderLogin(message = "") {
 }
 
 function signOut(message = "") {
+  for (const job of state.uploads) job.xhr?.abort();
+  state.uploads = [];
+  renderUploadPanel();
   forgetKey();
   Object.assign(state, { key: null, buckets: [], bucket: null, prefix: "", folders: [], files: [], cursor: "" });
   renderLogin(message);
@@ -222,9 +262,8 @@ function renderMain() {
     h("div", { class: "toolbar" },
       renderCrumbs(),
       fileInput,
-      h("button", { class: "primary", onclick: () => fileInput.click() }, "Upload"),
+      h("button", { class: "primary with-icon", onclick: () => fileInput.click() }, icon("upload"), "Upload"),
       h("button", { class: "link danger", onclick: deleteBucket, title: "Only empty buckets can be deleted" }, "Delete bucket")),
-    renderUploads(),
     renderTable());
   return main;
 }
@@ -237,15 +276,6 @@ function renderCrumbs() {
     crumbs.push(h("span", { class: "sep" }, "/"), h("button", { onclick: () => openPrefix(prefix) }, p));
   });
   return h("nav", { class: "crumbs", "aria-label": "Folder path" }, crumbs);
-}
-
-function renderUploads() {
-  if (state.uploads.length === 0) return h("div", { class: "uploads", hidden: true });
-  return h("div", { class: "uploads" }, state.uploads.map((u) =>
-    h("div", { class: u.failed ? "upload failed" : "upload" },
-      h("span", { class: "name", title: u.key }, u.key),
-      h("progress", { max: 1, value: u.progress }),
-      h("span", { class: "state muted" }, u.failed ? "Failed" : u.progress >= 1 ? "Done" : `${Math.round(u.progress * 100)}%`))));
 }
 
 function renderTable() {
@@ -263,9 +293,9 @@ function renderTable() {
       h("td", { class: "num" }, formatSize(o.size)),
       h("td", { class: "when" }, dateFmt.format(new Date(o.modified))),
       h("td", { class: "actions" },
-        h("button", { class: "link", onclick: () => download(o.key) }, "Download"),
-        h("button", { class: "link", onclick: () => share(o.key) }, "Share"),
-        h("button", { class: "link danger", onclick: () => deleteObject(o.key) }, "Delete")))),
+        iconButton("download", `Download ${baseName(o.key)}`, () => download(o.key)),
+        iconButton("share", `Share ${baseName(o.key)}`, () => share(o.key)),
+        iconButton("trash", `Delete ${baseName(o.key)}`, () => deleteObject(o.key), "danger")))),
   ];
   return h("div", {},
     h("table", {},
@@ -273,7 +303,7 @@ function renderTable() {
         h("th", { scope: "col" }, "Name"),
         h("th", { scope: "col", class: "num" }, "Size"),
         h("th", { scope: "col", class: "when" }, "Modified"),
-        h("th", { scope: "col" }, h("span", { class: "muted" }, "")))),
+        h("th", { scope: "col", class: "actions" }, h("span", { class: "visually-hidden" }, "Actions")))),
       h("tbody", {}, rows)),
     state.cursor && h("button", { class: "more", onclick: () => loadObjects(true) }, "Load more"));
 }
@@ -292,7 +322,6 @@ async function refreshBuckets() {
 
 async function openBucket(name) {
   state.bucket = name;
-  state.uploads = [];
   await openPrefix("");
   renderApp(); // updates the selected bucket in the sidebar
 }
@@ -323,7 +352,7 @@ async function download(key) {
     // A short-lived presigned URL lets the browser stream the file itself,
     // without the API key in the link.
     const { url } = await presign(state.bucket, key, "GET", 300);
-    const a = h("a", { href: url, download: key.split("/").pop(), rel: "noreferrer" });
+    const a = h("a", { href: url, download: baseName(key), rel: "noreferrer" });
     document.body.append(a);
     a.click();
     a.remove();
@@ -390,29 +419,149 @@ function wireDrop(el) {
   });
 }
 
-async function uploadFiles(files) {
-  const bucket = state.bucket;
-  const jobs = files.map((f) => ({ file: f, key: state.prefix + f.name, progress: 0, failed: false }));
-  state.uploads = jobs.concat(state.uploads.filter((u) => !u.failed && u.progress < 1));
-  rerenderMain();
-  // One at a time: a small server prefers a steady stream to a stampede.
-  for (const job of jobs) {
-    try {
-      await putFile(bucket, job);
-    } catch (err) {
-      job.failed = true;
-      showError(err);
-    }
-    if (state.bucket === bucket) rerenderMain();
+function uploadFiles(files) {
+  for (const file of files) {
+    state.uploads.push({
+      id: nextUploadId++, file, bucket: state.bucket, key: state.prefix + file.name,
+      status: "queued", progress: 0, error: null, xhr: null,
+    });
   }
-  if (state.bucket === bucket) await loadObjects(false);
+  state.uploadsCollapsed = false;
+  renderUploadPanel();
+  pumpUploads();
 }
 
-// XMLHttpRequest rather than fetch: it reports upload progress.
-function putFile(bucket, job) {
+let pumping = false;
+
+// pumpUploads runs queued jobs one at a time: a small server prefers a
+// steady stream to a stampede of parallel multi-GB uploads.
+async function pumpUploads() {
+  if (pumping) return;
+  pumping = true;
+  try {
+    let job;
+    while ((job = state.uploads.find((u) => u.status === "queued"))) {
+      job.status = "uploading";
+      renderUploadPanel();
+      try {
+        await putFile(job);
+        job.status = "done";
+        job.doneAt = Date.now();
+        // Fade finished rows out shortly after, then drop them.
+        setTimeout(() => removeUpload(job.id), 2500);
+        if (job.bucket === state.bucket && dirOf(job.key) === state.prefix) loadObjects(false);
+      } catch (err) {
+        if (job.status === "cancelled") continue;
+        job.status = "failed";
+        job.error = err instanceof ApiError ? `${err.message} (${err.code})` : err.message;
+      }
+      renderUploadPanel();
+    }
+  } finally {
+    pumping = false;
+  }
+}
+
+function removeUpload(id) {
+  const before = state.uploads.length;
+  state.uploads = state.uploads.filter((u) => u.id !== id);
+  if (state.uploads.length === before) return;
+  if (state.uploads.length === 0 && state.finishedCount) {
+    toast(state.finishedCount === 1 ? "1 file uploaded" : `${state.finishedCount} files uploaded`);
+    state.finishedCount = 0;
+  }
+  renderUploadPanel();
+}
+
+function cancelUpload(job) {
+  if (job.status === "uploading") job.xhr?.abort();
+  job.status = "cancelled";
+  removeUpload(job.id);
+}
+
+function retryUpload(job) {
+  Object.assign(job, { status: "queued", progress: 0, error: null });
+  renderUploadPanel();
+  pumpUploads();
+}
+
+function renderUploadPanel() {
+  const panel = document.getElementById("uploads");
+  const jobs = state.uploads;
+  if (jobs.length === 0) {
+    panel.hidden = true;
+    panel.replaceChildren();
+    return;
+  }
+  const active = jobs.filter((u) => u.status === "queued" || u.status === "uploading").length;
+  const failed = jobs.filter((u) => u.status === "failed").length;
+  const total = jobs.length;
+  // Count finished files too, even after their rows fade away, so the
+  // "n of m" never jumps backwards mid-batch.
+  const finished = state.finishedCount || 0;
+  let title;
+  if (active) title = `Uploading ${finished + 1} of ${finished + active}`;
+  else if (failed) title = failed === 1 ? "1 upload failed" : `${failed} uploads failed`;
+  else title = total === 1 ? "Upload complete" : `${total} uploads complete`;
+
+  panel.hidden = false;
+  panel.classList.toggle("collapsed", state.uploadsCollapsed);
+  panel.replaceChildren(
+    h("header", {},
+      h("strong", {}, title),
+      iconButton("chevron", state.uploadsCollapsed ? "Expand uploads" : "Collapse uploads", () => {
+        state.uploadsCollapsed = !state.uploadsCollapsed;
+        renderUploadPanel();
+      }, "flip"),
+      !active && iconButton("close", "Close", () => { state.uploads = []; state.finishedCount = 0; renderUploadPanel(); })),
+    !state.uploadsCollapsed && h("ul", {}, jobs.map(renderUploadRow)));
+}
+
+function renderUploadRow(job) {
+  const where = job.bucket + "/" + dirOf(job.key);
+  let status;
+  switch (job.status) {
+    case "queued":
+      status = [h("span", { class: "muted" }, "Waiting"), iconButton("close", `Cancel ${baseName(job.key)}`, () => cancelUpload(job))];
+      break;
+    case "uploading":
+      status = [
+        h("span", { class: "muted pct" }, job.progress >= 1 ? "Saving…" : `${Math.floor(job.progress * 100)}%`),
+        iconButton("close", `Cancel ${baseName(job.key)}`, () => cancelUpload(job)),
+      ];
+      break;
+    case "done":
+      status = [h("span", { class: "ok", "aria-label": "Uploaded" }, icon("check"))];
+      break;
+    case "failed":
+      status = [
+        h("span", { class: "bad", title: job.error }, icon("alert")),
+        iconButton("retry", `Retry ${baseName(job.key)}`, () => retryUpload(job)),
+        iconButton("close", `Dismiss ${baseName(job.key)}`, () => removeUpload(job.id)),
+      ];
+      break;
+  }
+  const li = h("li", { class: `job ${job.status}` },
+    h("div", { class: "job-text" },
+      h("span", { class: "job-name", title: job.key }, baseName(job.key)),
+      h("span", { class: "job-sub" }, job.status === "failed" ? job.error : `${formatSize(job.file.size)} · ${where}`)),
+    h("div", { class: "job-status" }, status),
+    job.status === "uploading" && h("progress", { max: 1, value: job.progress }));
+  if (job.status === "done") {
+    // Rows are rebuilt on every progress tick; keep the fade-out anchored to
+    // when this job finished rather than restarting it. (CSSOM writes are
+    // allowed under the CSP; style attributes in markup are not.)
+    li.style.animationDelay = `${1900 - (Date.now() - job.doneAt)}ms`;
+  }
+  return li;
+}
+
+// XMLHttpRequest rather than fetch: it reports upload progress and aborts.
+function putFile(job) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("PUT", objectPath(bucket, job.key));
+    job.xhr = xhr;
+    xhr.open("PUT", objectPath(job.bucket, job.key));
     xhr.setRequestHeader("Authorization", `Bearer ${state.key}`);
     xhr.setRequestHeader("Content-Type", job.file.type || "application/octet-stream");
     let last = 0;
@@ -420,18 +569,35 @@ function putFile(bucket, job) {
       if (!e.lengthComputable) return;
       job.progress = e.loaded / e.total;
       const now = performance.now();
-      if (now - last > 150 && state.bucket === bucket) { last = now; rerenderMain(); }
+      if (now - last > 200 || job.progress >= 1) { last = now; renderUploadPanel(); }
     };
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) { job.progress = 1; resolve(); return; }
+      job.xhr = null;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        state.finishedCount = (state.finishedCount || 0) + 1;
+        resolve();
+        return;
+      }
       let e = {};
       try { e = JSON.parse(xhr.responseText).error || {}; } catch { /* not JSON */ }
       reject(new ApiError(xhr.status, e.code || `HTTP${xhr.status}`, e.message || "Upload failed", e.requestId));
     };
-    xhr.onerror = () => reject(new Error(`Network error uploading ${job.key}`));
+    xhr.onerror = () => { job.xhr = null; reject(new Error("Network error")); };
+    xhr.onabort = () => { job.xhr = null; reject(new Error("Cancelled")); };
     xhr.send(job.file);
   });
 }
+
+function baseName(key) { return key.slice(key.lastIndexOf("/") + 1) || key; }
+function dirOf(key) { return key.slice(0, key.lastIndexOf("/") + 1); }
+
+// Closing the tab kills running uploads; ask first.
+window.addEventListener("beforeunload", (e) => {
+  if (state.uploads.some((u) => u.status === "uploading" || u.status === "queued")) {
+    e.preventDefault();
+    e.returnValue = ""; // older browsers need this to show the prompt
+  }
+});
 
 // ---------- Start ----------
 

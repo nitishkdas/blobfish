@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
@@ -527,4 +528,40 @@ func TestRootRedirectsToUI(t *testing.T) {
 		t.Errorf("Location = %q", loc)
 	}
 	a.must(http.StatusOK, "GET", "/ui/", "", nil)
+}
+
+// hangUp sends n bytes and then fails the way a body read does when the
+// client disconnects or cancels mid-upload.
+type hangUp struct {
+	n   int
+	err error
+}
+
+func (h *hangUp) Read(p []byte) (int, error) {
+	if h.n <= 0 {
+		return 0, h.err
+	}
+	k := min(len(p), h.n)
+	h.n -= k
+	return k, nil
+}
+
+func TestClientHangUpIsNotServerError(t *testing.T) {
+	a := newTestAPI(t)
+	a.must(http.StatusCreated, "PUT", "/v1/buckets/hang-up", a.admin, nil)
+	a.must(http.StatusOK, "PUT", "/v1/b/hang-up/k", a.admin, strings.NewReader("keep me"))
+	for _, cause := range []error{io.ErrUnexpectedEOF, syscall.ECONNRESET} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			rr := a.do("PUT", "/v1/b/hang-up/k", a.admin, &hangUp{n: 64 << 10, err: cause})
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status %d, want 400; body %s", rr.Code, rr.Body)
+			}
+			if c := errCode(t, rr); c != CodeIncompleteBody {
+				t.Errorf("code = %s", c)
+			}
+			if got := a.must(http.StatusOK, "GET", "/v1/b/hang-up/k", a.admin, nil).Body.String(); got != "keep me" {
+				t.Errorf("old object replaced by partial upload: %q", got)
+			}
+		})
+	}
 }
