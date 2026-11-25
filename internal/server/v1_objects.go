@@ -109,6 +109,7 @@ func (a *api) authorizeRead(w http.ResponseWriter, r *http.Request, t auth.Targe
 	anonymous := r.Header.Get("Authorization") == "" && !r.URL.Query().Has("sig")
 	if anonymous && t.Key != "" {
 		if b, err := a.buckets.GetBucket(r.Context(), t.Bucket); err == nil && b.Public {
+			setActor(r, "public")
 			return true, true
 		}
 	}

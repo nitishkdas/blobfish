@@ -47,7 +47,7 @@ func (a *api) toLinkJSON(r *http.Request, l store.LinkRecord) linkJSON {
 // createLink makes a share link to one object. Anyone who can read the
 // object may share it, the same rule as for presigned GET URLs.
 func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
-	p, err := a.auth.Authenticate(r, auth.Target{})
+	p, err := a.authenticate(r, auth.Target{})
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -127,7 +127,7 @@ func (a *api) listLinks(w http.ResponseWriter, r *http.Request) {
 // deleteLink revokes a link. Allowed for the key that created it, or any
 // key that can write the bucket.
 func (a *api) deleteLink(w http.ResponseWriter, r *http.Request) {
-	p, err := a.auth.Authenticate(r, auth.Target{})
+	p, err := a.authenticate(r, auth.Target{})
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -159,6 +159,7 @@ func (a *api) serveLink(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, fmt.Errorf("%w on %s", errLinkExpired, rec.Expires.Format(time.RFC3339)))
 		return
 	}
+	setActor(r, "link:"+rec.ID)
 	name := path.Base(rec.Key)
 	a.serveObject(w, r, auth.Target{Bucket: rec.Bucket, Key: rec.Key}, func(h http.Header) {
 		h.Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))

@@ -121,7 +121,18 @@ Point the DNS name at the server, open ports 80 and 443, and reload Caddy
 Caddy does not limit request body size by default, so large uploads pass
 through; BlobFish enforces `max_object_size` itself.
 
-## 5. Back up
+## 5. Monitor
+
+- `GET /healthz` (no key) answers 503 when the metadata store or the data
+  disk fails (it writes and fsyncs a small probe file each time), and
+  `"status":"degraded"` when free space is down to `min_free_space`. Point
+  your uptime monitor at `https://files.example.com/healthz`.
+- `GET /v1/status` (admin key) shows version, uptime, free disk space and
+  request/byte counters since start.
+- Each access log line names who made the request (`key=app1/3f9c…`,
+  `presigned`, `link:<id>` or `public`) and the real client address.
+
+## 6. Back up
 
 Backups are your only second copy on a single server. For example, nightly
 with a key kept in `/etc/blobfish/backup-key` (mode 0600, a `*:admin` key):
@@ -136,7 +147,7 @@ Check a backup now and then by restoring it somewhere else:
 verifies its checksum. Backups contain key hashes and share-link tokens:
 store them as carefully as the data.
 
-## 6. Upgrade
+## 7. Upgrade
 
 Stop the service, replace `/usr/local/bin/blobfish`, start it again. The data
 dir records its format version: a newer binary upgrades it in place (all or

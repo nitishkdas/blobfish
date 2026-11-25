@@ -68,6 +68,15 @@ func recoverMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 // logFields carries values from deep in a handler back to the access log.
 type logFields struct {
 	errCode string // API error code, set by writeError
+	actor   string // who made the request, set by authentication
+}
+
+// setActor records who made the request for the access log: an API key's
+// name and ID, "presigned", "link:<id>" or "public". Never a secret.
+func setActor(r *http.Request, actor string) {
+	if f := logFieldsFrom(r); f != nil {
+		f.actor = actor
+	}
 }
 
 func logFieldsFrom(r *http.Request) *logFields {
@@ -77,12 +86,14 @@ func logFieldsFrom(r *http.Request) *logFields {
 
 // logMiddleware writes one access-log line per request. Failed requests
 // also log their API error code, so "status=400" says which 400.
-func logMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
+func logMiddleware(log *slog.Logger, stats *serverStats) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			rec := &statusRecorder{ResponseWriter: w}
 			fields := &logFields{}
+			body := &countingBody{ReadCloser: r.Body}
+			r.Body = body
 			next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), logFieldsKey, fields)))
 			status := rec.status
 			if status == 0 {
@@ -97,6 +108,9 @@ func logMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 			if fields.errCode != "" {
 				attrs = append(attrs, "code", fields.errCode)
 			}
+			if fields.actor != "" {
+				attrs = append(attrs, "key", fields.actor)
+			}
 			client := clientFrom(r)
 			attrs = append(attrs,
 				"bytes", rec.bytes,
@@ -106,6 +120,9 @@ func logMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 				attrs = append(attrs, "proxy", client.proxy)
 			}
 			log.InfoContext(r.Context(), "request", attrs...)
+			if stats != nil {
+				stats.record(status, body.n, rec.bytes)
+			}
 		})
 	}
 }

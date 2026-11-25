@@ -31,7 +31,7 @@ func newTestHandler(t *testing.T, maxBody int64, extra map[string]http.HandlerFu
 	}
 	return chain(mux,
 		requestIDMiddleware,
-		logMiddleware(log),
+		logMiddleware(log, nil),
 		recoverMiddleware(log),
 		maxBodyMiddleware(maxBody),
 	), &logs

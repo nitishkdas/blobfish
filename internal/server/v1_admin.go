@@ -67,7 +67,7 @@ func (a *api) deleteBucket(w http.ResponseWriter, r *http.Request) {
 
 // listBuckets returns only the buckets the caller can read.
 func (a *api) listBuckets(w http.ResponseWriter, r *http.Request) {
-	p, err := a.auth.Authenticate(r, auth.Target{})
+	p, err := a.authenticate(r, auth.Target{})
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -97,7 +97,7 @@ type whoamiResponse struct {
 // so the web UI can hide actions that would only end in a 403. It reveals
 // nothing the caller couldn't learn by trying, and never the token.
 func (a *api) whoami(w http.ResponseWriter, r *http.Request) {
-	p, err := a.auth.Authenticate(r, auth.Target{})
+	p, err := a.authenticate(r, auth.Target{})
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -127,7 +127,7 @@ type presignResponse struct {
 // presign issues a URL that grants one method on one object until expiry.
 // The caller must itself hold the permission it is handing out.
 func (a *api) presign(w http.ResponseWriter, r *http.Request) {
-	p, err := a.auth.Authenticate(r, auth.Target{})
+	p, err := a.authenticate(r, auth.Target{})
 	if err != nil {
 		a.fail(w, r, err)
 		return

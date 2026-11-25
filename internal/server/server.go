@@ -31,6 +31,10 @@ type Options struct {
 	Auth        *auth.Service
 	Links       store.Links
 	Backup      store.Backuper
+	Health      store.HealthChecker
+	// Version and DataFormat are reported by GET /v1/status.
+	Version    string
+	DataFormat int
 	// PublicURL is the base for presigned URLs; empty means "use the Host
 	// header of the presign request".
 	PublicURL string
@@ -38,31 +42,41 @@ type Options struct {
 
 // api holds the /v1 handlers' dependencies.
 type api struct {
-	log       *slog.Logger
-	store     store.Store
-	buckets   store.Buckets
-	auth      *auth.Service
-	links     store.Links
-	backuper  store.Backuper
-	publicURL string
-	maxObject int64
+	log      *slog.Logger
+	store    store.Store
+	buckets  store.Buckets
+	auth     *auth.Service
+	links    store.Links
+	backuper store.Backuper
+	health   store.HealthChecker
+	stats    *serverStats
+	version  string
+	// dataFormat is the on-disk format version, for /v1/status.
+	dataFormat int
+	publicURL  string
+	maxObject  int64
 }
 
 // New returns the root handler with all routes and middleware applied.
 func New(opts Options) http.Handler {
 	a := &api{
-		log:       opts.Logger,
-		store:     opts.Store,
-		buckets:   opts.Buckets,
-		auth:      opts.Auth,
-		links:     opts.Links,
-		backuper:  opts.Backup,
-		publicURL: strings.TrimSuffix(opts.PublicURL, "/"),
-		maxObject: opts.MaxObjectSize,
+		log:        opts.Logger,
+		store:      opts.Store,
+		buckets:    opts.Buckets,
+		auth:       opts.Auth,
+		links:      opts.Links,
+		backuper:   opts.Backup,
+		health:     opts.Health,
+		stats:      &serverStats{started: time.Now()},
+		version:    opts.Version,
+		dataFormat: opts.DataFormat,
+		publicURL:  strings.TrimSuffix(opts.PublicURL, "/"),
+		maxObject:  opts.MaxObjectSize,
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", handleHealthz)
+	mux.HandleFunc("GET /healthz", a.healthz)
+	mux.HandleFunc("GET /v1/status", a.status)
 	mux.HandleFunc("GET /v1/whoami", a.whoami)
 	mux.HandleFunc("GET /v1/backup", a.backup)
 	mux.HandleFunc("GET /v1/buckets", a.listBuckets)
@@ -102,7 +116,7 @@ func New(opts Options) http.Handler {
 	return chain(root,
 		requestIDMiddleware,
 		clientIPMiddleware(opts.TrustedProxies),
-		logMiddleware(opts.Logger),
+		logMiddleware(opts.Logger, a.stats),
 		recoverMiddleware(opts.Logger),
 		maxBodyMiddleware(opts.MaxObjectSize),
 		idleTimeoutMiddleware(opts.IdleTimeout),
@@ -115,10 +129,6 @@ func chain(h http.Handler, mws ...func(http.Handler) http.Handler) http.Handler 
 		h = mws[i](h)
 	}
 	return h
-}
-
-func handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func handleNotFound(w http.ResponseWriter, r *http.Request) {
@@ -142,8 +152,22 @@ func (a *api) fail(w http.ResponseWriter, r *http.Request, err error) {
 
 // authorize authenticates the request and checks it holds perm on t.
 // On failure it writes the error response and returns false.
-func (a *api) authorize(w http.ResponseWriter, r *http.Request, t auth.Target, perm auth.Perm) (auth.Principal, bool) {
+// authenticate identifies the caller and records who it is for the access
+// log. Handlers use it instead of calling a.auth directly.
+func (a *api) authenticate(r *http.Request, t auth.Target) (auth.Principal, error) {
 	p, err := a.auth.Authenticate(r, t)
+	if err == nil {
+		if p.KeyID != "" {
+			setActor(r, p.KeyName+"/"+p.KeyID)
+		} else {
+			setActor(r, "presigned")
+		}
+	}
+	return p, err
+}
+
+func (a *api) authorize(w http.ResponseWriter, r *http.Request, t auth.Target, perm auth.Perm) (auth.Principal, bool) {
+	p, err := a.authenticate(r, t)
 	if err != nil {
 		a.fail(w, r, err)
 		return auth.Principal{}, false

@@ -70,6 +70,22 @@ type LinkRecord struct {
 	CreatedByName string    `json:"createdByName"` // its name at the time
 }
 
+// HealthChecker runs a self-check of the data store.
+type HealthChecker interface {
+	Health(ctx context.Context) HealthReport
+}
+
+// HealthReport is the outcome of a self-check.
+type HealthReport struct {
+	Metadata  error // metadata database is readable
+	Disk      error // data disk accepts a write and fsync
+	FreeBytes int64 // free space on the data disk; -1 if unknown
+	Reserve   int64 // configured free-space reserve
+	// LowSpace: free space is at or below the reserve, so uploads are
+	// refused (reads and deletes still work).
+	LowSpace bool
+}
+
 // Backuper writes a consistent snapshot of everything (metadata and every
 // referenced object) to w, without stopping reads or writes.
 type Backuper interface {
