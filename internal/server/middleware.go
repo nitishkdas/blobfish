@@ -97,10 +97,14 @@ func logMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 			if fields.errCode != "" {
 				attrs = append(attrs, "code", fields.errCode)
 			}
+			client := clientFrom(r)
 			attrs = append(attrs,
 				"bytes", rec.bytes,
 				"duration", time.Since(start),
-				"remote", r.RemoteAddr)
+				"remote", client.ip)
+			if client.proxy != "" {
+				attrs = append(attrs, "proxy", client.proxy)
+			}
 			log.InfoContext(r.Context(), "request", attrs...)
 		})
 	}

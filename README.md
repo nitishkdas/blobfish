@@ -63,6 +63,13 @@ Scopes are `<bucket>:<r|w|rw|admin>`, with `*` for every bucket. Creating
 buckets and managing keys needs `*:admin`. Errors always look like
 `{"error":{"code":"NoSuchKey","message":"...","requestId":"..."}}`.
 
+## Production
+
+BlobFish speaks plain HTTP: run it on `127.0.0.1` behind Caddy, which adds
+HTTPS automatically. [docs/deploy.md](docs/deploy.md) has the complete setup
+(config, a hardened systemd unit, Caddyfile, backups, upgrades), tested end
+to end.
+
 ## Backups
 
 BlobFish runs on one machine, so backups are your only second copy. A backup
@@ -101,6 +108,7 @@ See `blobfish.example.json`.
 | `transfer_idle_timeout` (drop a transfer with no progress for this long) | `BLOBFISH_TRANSFER_IDLE_TIMEOUT` | `60s` |
 | `max_connections` (extra clients wait in the accept queue) | `BLOBFISH_MAX_CONNECTIONS` | `1000` |
 | `min_free_space` (bytes uploads never use, so deletes always fit; 0 = off) | `BLOBFISH_MIN_FREE_SPACE` | `536870912` (512 MiB) |
+| `trusted_proxies` (reverse proxies whose `X-Forwarded-For`/`-Proto` are believed) | `BLOBFISH_TRUSTED_PROXIES` (comma-separated) | none |
 
 ## License
 

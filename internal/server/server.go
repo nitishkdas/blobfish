@@ -7,6 +7,7 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -19,6 +20,9 @@ import (
 type Options struct {
 	Logger        *slog.Logger
 	MaxObjectSize int64
+	// TrustedProxies are reverse proxies whose X-Forwarded-For and
+	// X-Forwarded-Proto headers are believed.
+	TrustedProxies []netip.Prefix
 	// IdleTimeout drops a body transfer that makes no progress for this
 	// long. Zero disables it (tests only).
 	IdleTimeout time.Duration
@@ -97,6 +101,7 @@ func New(opts Options) http.Handler {
 	// protection, then the body limit, then the no-progress timeout.
 	return chain(root,
 		requestIDMiddleware,
+		clientIPMiddleware(opts.TrustedProxies),
 		logMiddleware(opts.Logger),
 		recoverMiddleware(opts.Logger),
 		maxBodyMiddleware(opts.MaxObjectSize),

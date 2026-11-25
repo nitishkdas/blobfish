@@ -106,17 +106,22 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	}
 	ln = server.LimitListener(ln, cfg.MaxConnections)
 
+	trusted, err := server.ParseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Handler: server.New(server.Options{
-			Logger:        log,
-			MaxObjectSize: cfg.MaxObjectSize,
-			IdleTimeout:   time.Duration(cfg.TransferIdleTimeout),
-			Store:         eng,
-			Buckets:       eng,
-			Auth:          authSvc,
-			Links:         eng,
-			Backup:        eng,
-			PublicURL:     cfg.PublicURL,
+			Logger:         log,
+			MaxObjectSize:  cfg.MaxObjectSize,
+			IdleTimeout:    time.Duration(cfg.TransferIdleTimeout),
+			TrustedProxies: trusted,
+			Store:          eng,
+			Buckets:        eng,
+			Auth:           authSvc,
+			Links:          eng,
+			Backup:         eng,
+			PublicURL:      cfg.PublicURL,
 		}),
 		// Headers get a fixed limit. Bodies can be multi-GB streams on slow
 		// links, so instead of ReadTimeout/WriteTimeout (which bound the whole

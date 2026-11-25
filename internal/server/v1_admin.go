@@ -164,7 +164,7 @@ func (a *api) baseURL(r *http.Request) string {
 		return a.publicURL
 	}
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+	if clientFrom(r).https { // X-Forwarded-Proto counts only from trusted proxies
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host

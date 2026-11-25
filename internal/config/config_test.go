@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +85,9 @@ func TestLoad(t *testing.T) {
 		{name: "min free space env", env: map[string]string{"BLOBFISH_MIN_FREE_SPACE": "0"},
 			want: func(c Config) Config { c.MinFreeSpace = 0; return c }},
 		{name: "negative min free space", file: `{"min_free_space": -1}`, wantErr: "min_free_space"},
+		{name: "trusted proxies env", env: map[string]string{"BLOBFISH_TRUSTED_PROXIES": "127.0.0.1,10.0.0.0/8"},
+			want: func(c Config) Config { c.TrustedProxies = []string{"127.0.0.1", "10.0.0.0/8"}; return c }},
+		{name: "bad trusted proxy", file: `{"trusted_proxies": ["caddy"]}`, wantErr: "trusted_proxies"},
 		{name: "zero connections", env: map[string]string{"BLOBFISH_MAX_CONNECTIONS": "0"}, wantErr: "max_connections"},
 		{name: "public url no scheme", file: `{"public_url": "files.example.com"}`, wantErr: "public_url"},
 		{name: "public url with path", file: `{"public_url": "https://x.com/sub"}`, wantErr: "public_url"},
@@ -105,7 +109,7 @@ func TestLoad(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Load() unexpected error: %v", err)
 			}
-			if want := tt.want(Default()); got != want {
+			if want := tt.want(Default()); !reflect.DeepEqual(got, want) {
 				t.Errorf("Load() = %+v, want %+v", got, want)
 			}
 		})
