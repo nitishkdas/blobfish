@@ -1,0 +1,12 @@
+# Build output
+/blobfish
+/dist/
+
+# Local data dirs and configs
+/data/
+/blobfish.json
+
+# Test and profiling artifacts
+*.test
+*.out
+*.prof

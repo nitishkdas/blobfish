@@ -1,0 +1,7 @@
+{
+  "listen": ":8080",
+  "data_dir": "data",
+  "max_object_size": 5368709120,
+  "log_level": "info",
+  "log_format": "text"
+}
