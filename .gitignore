@@ -10,3 +10,6 @@
 *.test
 *.out
 *.prof
+
+# Power-cut test build output
+/test/powercut/build/

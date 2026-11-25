@@ -10,7 +10,7 @@ BlobFish is a minimal, single-node, open-source object store written in Go. It s
 
 - Working title was "tinys3". The name is now **BlobFish**, command `blobfish`.
 - License: **Apache 2.0**. Fully open source: no paid edition, no closed features.
-- Status: milestones 1–7 done (skeleton, storage engine, /v1 API + auth, web UI + hardening). Open: power-cut gate test, a real-browser pass over the UI. Next: dogfooding (milestones 8–9).
+- Status: milestones 1–7 done (skeleton, storage engine, /v1 API + auth, web UI + hardening). Storage gate: crash tests and simulated power-cut test (LazyFS) pass; directory-fsync loss is untested (needs dm-log-writes). Next: dogfooding (milestones 8–9).
 
 ## Why it exists
 
@@ -132,7 +132,10 @@ go test -short ./...                                # skip kill -9 and 256 MB st
 go test -run '^$' -fuzz '^FuzzList$' -fuzztime 60s ./internal/engine   # one fuzz target at a time
 BLOBFISH_LOADTEST=1 go test -run TestLoadSmallMachine -v ./internal/server   # 1-CPU load report
 node --check internal/webui/static/app.js           # UI has no build step; this is its only lint
+test/powercut/run.sh -rounds 30                     # simulated power cuts (Docker + LazyFS); exit 0 pass, 1 fail, 2 inconclusive
 ```
+
+Power-cut test (`test/powercut/`, see its README): blobfish's data dir on LazyFS inside Docker; each round SIGKILLs blobfish, drops all unsynced data (`lazyfs::clear-cache`), remounts, restarts and checks every key against a ledger of acknowledged requests. It catches a missing blob fsync or bbolt `NoSync`; it cannot catch a missing *directory* fsync (LazyFS passes metadata ops straight through). LazyFS runs with `-s` because multi-threaded mode segfaults.
 
 Fuzz targets: `FuzzRangeResolve`, `FuzzValidateKey`, `FuzzValidateBucketName` (store), `FuzzParseRange`, `FuzzETagMatches` (server), `FuzzList` (engine, checks pagination against an in-memory model).
 

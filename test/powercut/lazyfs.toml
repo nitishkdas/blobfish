@@ -1,0 +1,18 @@
+# LazyFS keeps written data in its own cache until fsync. The driver sends
+# "lazyfs::clear-cache" to throw away everything unsynced: a power cut.
+[faults]
+fifo_path="/tmp/faults.fifo"
+fifo_path_completed="/tmp/faults_done.fifo"
+
+[cache]
+# No eviction: unsynced data stays unsynced until fsync or the cut, the
+# harshest case. The cache resets every round because the driver remounts.
+apply_eviction=false
+
+[cache.simple]
+custom_size="1GB"
+blocks_per_page=1
+
+[filesystem]
+log_all_operations=false
+logfile="/tmp/lazyfs.log"
