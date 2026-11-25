@@ -42,6 +42,7 @@ const (
 	CodeNoSuchLink        = "NoSuchLink"
 	CodeLinkExpired       = "LinkExpired"
 	CodeRequestTimeout    = "RequestTimeout"
+	CodeInsufficientSpace = "InsufficientStorage"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This
@@ -61,6 +62,8 @@ var errorMapping = []struct {
 	{store.ErrInvalidCursor, http.StatusBadRequest, CodeInvalidCursor},
 	{store.ErrMetadataTooLarge, http.StatusBadRequest, CodeMetadataTooLarge},
 	{store.ErrDataCorrupt, http.StatusInternalServerError, CodeDataCorrupt},
+	{store.ErrInsufficientStorage, http.StatusInsufficientStorage, CodeInsufficientSpace},
+	{syscall.ENOSPC, http.StatusInsufficientStorage, CodeInsufficientSpace}, // reserve disabled or raced
 	{store.ErrNoSuchAPIKey, http.StatusNotFound, CodeNoSuchAPIKey},
 	{store.ErrNoSuchLink, http.StatusNotFound, CodeNoSuchLink},
 	{errLinkExpired, http.StatusGone, CodeLinkExpired},

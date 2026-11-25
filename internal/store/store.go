@@ -98,6 +98,10 @@ type Meta struct {
 	ContentType string
 	// User holds X-Meta-* style pairs. Total size is capped by MaxUserMetaBytes.
 	User map[string]string
+	// SizeHint is the body size when known in advance (Content-Length), so
+	// an upload that can't fit is refused before it streams. <= 0: unknown.
+	// Not stored.
+	SizeHint int64
 }
 
 // ObjectInfo describes a stored object.
@@ -166,4 +170,7 @@ var (
 	ErrDataCorrupt       = errors.New("stored data failed integrity check")
 	ErrNoSuchAPIKey      = errors.New("API key not found")
 	ErrNoSuchLink        = errors.New("share link not found")
+	// ErrInsufficientStorage: accepting the upload would cut into the free
+	// space reserve kept so deletes and metadata updates always fit.
+	ErrInsufficientStorage = errors.New("not enough free disk space")
 )

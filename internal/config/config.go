@@ -43,6 +43,9 @@ type Config struct {
 	// clients wait in the kernel's accept queue instead of exhausting
 	// memory or file handles.
 	MaxConnections int `json:"max_connections"`
+	// MinFreeSpace is disk space, in bytes, that uploads may never use, so
+	// deletes and metadata updates always fit. 0 disables the check.
+	MinFreeSpace int64 `json:"min_free_space"`
 }
 
 // Duration is a time.Duration written as a string like "60s" or "2m" in
@@ -73,6 +76,7 @@ func Default() Config {
 
 		TransferIdleTimeout: Duration(60 * time.Second),
 		MaxConnections:      1000,
+		MinFreeSpace:        512 << 20, // 512 MiB
 	}
 }
 
@@ -146,6 +150,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 			return fmt.Errorf("BLOBFISH_TRANSFER_IDLE_TIMEOUT: %w", err)
 		}
 	}
+	if v := getenv("BLOBFISH_MIN_FREE_SPACE"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return fmt.Errorf("BLOBFISH_MIN_FREE_SPACE: %w", err)
+		}
+		cfg.MinFreeSpace = n
+	}
 	if v := getenv("BLOBFISH_MAX_CONNECTIONS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -177,6 +188,9 @@ func (c Config) Validate() error {
 	}
 	if time.Duration(c.TransferIdleTimeout) < time.Second {
 		return fmt.Errorf("config: transfer_idle_timeout must be at least 1s, got %s", time.Duration(c.TransferIdleTimeout))
+	}
+	if c.MinFreeSpace < 0 {
+		return fmt.Errorf("config: min_free_space must be 0 or more bytes, got %d", c.MinFreeSpace)
 	}
 	if c.MaxConnections < 1 {
 		return fmt.Errorf("config: max_connections must be at least 1, got %d", c.MaxConnections)

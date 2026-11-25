@@ -67,7 +67,7 @@ func (a *api) putObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
 	if _, ok := a.authorize(w, r, t, auth.PermWrite); !ok {
 		return
 	}
-	meta := store.Meta{ContentType: r.Header.Get("Content-Type")}
+	meta := store.Meta{ContentType: r.Header.Get("Content-Type"), SizeHint: r.ContentLength}
 	for name, vals := range r.Header {
 		if k, ok := strings.CutPrefix(name, metaHeader); ok && k != "" {
 			if meta.User == nil {

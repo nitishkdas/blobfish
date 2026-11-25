@@ -55,6 +55,9 @@ var errSimulatedCrash = errors.New("simulated crash")
 // Options configures Open.
 type Options struct {
 	Logger *slog.Logger
+	// MinFreeBytes is free disk space uploads may never eat into, so
+	// deletes and metadata commits always have room. 0 disables the check.
+	MinFreeBytes int64
 }
 
 // Engine stores objects in a data directory. It is safe for concurrent use.
@@ -66,6 +69,9 @@ type Engine struct {
 	log                 *slog.Logger
 	now                 func() time.Time
 	presignSecret       []byte
+	minFree             int64
+	// freeSpace reports free bytes on the data disk; tests replace it.
+	freeSpace func() (uint64, error)
 
 	// inflight holds names of tmp files and blob IDs that a running Put owns
 	// but has not committed yet. The janitor skips them.
@@ -118,7 +124,9 @@ func Open(dir string, opts Options) (*Engine, error) {
 		log:      log,
 		now:      func() time.Time { return time.Now().UTC() },
 		inflight: make(map[string]struct{}),
+		minFree:  opts.MinFreeBytes,
 	}
+	e.freeSpace = func() (uint64, error) { return diskFree(dir) }
 	for _, d := range []string{dir, e.objDir, e.tmpDir} {
 		if err := os.MkdirAll(d, 0o750); err != nil {
 			return nil, fmt.Errorf("create %s: %w", d, err)

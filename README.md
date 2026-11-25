@@ -77,6 +77,7 @@ See `blobfish.example.json`.
 | `public_url` (base for presigned URLs) | `BLOBFISH_PUBLIC_URL` | request `Host` |
 | `transfer_idle_timeout` (drop a transfer with no progress for this long) | `BLOBFISH_TRANSFER_IDLE_TIMEOUT` | `60s` |
 | `max_connections` (extra clients wait in the accept queue) | `BLOBFISH_MAX_CONNECTIONS` | `1000` |
+| `min_free_space` (bytes uploads never use, so deletes always fit; 0 = off) | `BLOBFISH_MIN_FREE_SPACE` | `536870912` (512 MiB) |
 
 ## License
 

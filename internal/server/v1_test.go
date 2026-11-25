@@ -798,3 +798,25 @@ func TestPublicBuckets(t *testing.T) {
 	setPublic(bucketAdmin, false, http.StatusOK)
 	a.must(http.StatusUnauthorized, "GET", "/v1/b/assets/img/logo.svg", "", nil)
 }
+
+func TestInsufficientStorageIs507(t *testing.T) {
+	eng, err := engine.Open(t.TempDir(), engine.Options{MinFreeBytes: 1 << 62}) // no disk is this big
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	svc := auth.NewService(eng, eng.PresignSecret())
+	admin, _ := svc.EnsureAdminKey(context.Background())
+	a := &testAPI{t: t, auth: svc, eng: eng, admin: admin, h: New(Options{
+		Logger: slog.New(slog.DiscardHandler), MaxObjectSize: 1 << 30,
+		Store: eng, Buckets: eng, Auth: svc, Links: eng,
+	})}
+	a.must(http.StatusCreated, "PUT", "/v1/buckets/full-b", admin, nil)
+	rr := a.must(http.StatusInsufficientStorage, "PUT", "/v1/b/full-b/k", admin, strings.NewReader("data"))
+	if c := errCode(t, rr); c != CodeInsufficientSpace {
+		t.Errorf("code = %s", c)
+	}
+	if !strings.Contains(rr.Body.String(), "reserved") {
+		t.Errorf("message should explain the reserve: %s", rr.Body)
+	}
+}

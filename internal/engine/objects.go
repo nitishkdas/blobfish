@@ -36,6 +36,10 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 	if err := store.ValidateMeta(meta); err != nil {
 		return store.ObjectInfo{}, err
 	}
+	// Refuse early if the upload can't fit above the free-space reserve.
+	if err := e.checkSpace(meta.SizeHint); err != nil {
+		return store.ObjectInfo{}, err
+	}
 	// Fail fast before streaming gigabytes into a bucket that isn't there.
 	// The commit re-checks, in case the bucket is deleted meanwhile.
 	if err := e.db.View(func(tx *bbolt.Tx) error {
@@ -58,7 +62,9 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 	}
 
 	h := sha256.New()
-	size, err := io.Copy(io.MultiWriter(tmp, h), ctxReader{ctx, r})
+	// spaceGuard re-checks free space as the body streams, for uploads of
+	// unknown size and for space taken by other uploads meanwhile.
+	size, err := io.Copy(io.MultiWriter(&spaceGuard{w: tmp, e: e}, h), ctxReader{ctx, r})
 	if err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
