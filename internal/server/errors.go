@@ -43,6 +43,7 @@ const (
 	CodeLinkExpired       = "LinkExpired"
 	CodeRequestTimeout    = "RequestTimeout"
 	CodeInsufficientSpace = "InsufficientStorage"
+	CodeCORSNotAllowed    = "CORSNotAllowed"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This

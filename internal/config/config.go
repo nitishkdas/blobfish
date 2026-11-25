@@ -51,6 +51,10 @@ type Config struct {
 	// X-Forwarded-For / X-Forwarded-Proto headers are believed, e.g.
 	// ["127.0.0.1"] when Caddy runs on the same machine.
 	TrustedProxies []string `json:"trusted_proxies"`
+	// CORSAllowedOrigins lists web origins whose pages may call BlobFish
+	// from the browser (e.g. upload to a presigned URL), like
+	// ["https://app.example.com"]. "*" allows any origin.
+	CORSAllowedOrigins []string `json:"cors_allowed_origins"`
 }
 
 // Duration is a time.Duration written as a string like "60s" or "2m" in
@@ -155,6 +159,9 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 			return fmt.Errorf("BLOBFISH_TRANSFER_IDLE_TIMEOUT: %w", err)
 		}
 	}
+	if v := getenv("BLOBFISH_CORS_ALLOWED_ORIGINS"); v != "" {
+		cfg.CORSAllowedOrigins = strings.Split(v, ",")
+	}
 	if v := getenv("BLOBFISH_TRUSTED_PROXIES"); v != "" {
 		cfg.TrustedProxies = strings.Split(v, ",")
 	}
@@ -196,6 +203,19 @@ func (c Config) Validate() error {
 	}
 	if time.Duration(c.TransferIdleTimeout) < time.Second {
 		return fmt.Errorf("config: transfer_idle_timeout must be at least 1s, got %s", time.Duration(c.TransferIdleTimeout))
+	}
+	for i, o := range c.CORSAllowedOrigins {
+		o = strings.TrimSpace(o)
+		c.CORSAllowedOrigins[i] = o
+		if o == "*" {
+			continue
+		}
+		// Browsers send exactly scheme://host[:port]: no path, no slash.
+		u, err := url.Parse(o)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+			u.Path != "" || u.RawQuery != "" || u.User != nil {
+			return fmt.Errorf("config: cors_allowed_origins entry %q must look like https://app.example.com (no path or trailing slash) or *", o)
+		}
 	}
 	for _, p := range c.TrustedProxies {
 		p = strings.TrimSpace(p)

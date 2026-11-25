@@ -26,6 +26,7 @@ sudo install -d -m 0750 -o blobfish -g blobfish /var/lib/blobfish /etc/blobfish
   "data_dir": "/var/lib/blobfish",
   "public_url": "https://files.example.com",
   "trusted_proxies": ["127.0.0.1", "::1"],
+  "cors_allowed_origins": ["https://app.example.com"],
   "max_object_size": 5368709120,
   "min_free_space": 1073741824,
   "transfer_idle_timeout": "60s",
@@ -40,6 +41,9 @@ sudo install -d -m 0750 -o blobfish -g blobfish /var/lib/blobfish /etc/blobfish
 - `trusted_proxies` lets BlobFish log the real client address that Caddy
   passes in `X-Forwarded-For`. Only list proxies you run: anyone listed can
   claim to be any client.
+- `cors_allowed_origins` lets pages on your app's site upload straight to
+  BlobFish with presigned URLs. Leave it out if only servers and mobile apps
+  talk to BlobFish.
 - `min_free_space` (here 1 GiB) is never used by uploads, so deletes and
   metadata updates always have room.
 

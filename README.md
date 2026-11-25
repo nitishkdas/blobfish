@@ -63,6 +63,29 @@ Scopes are `<bucket>:<r|w|rw|admin>`, with `*` for every bucket. Creating
 buckets and managing keys needs `*:admin`. Errors always look like
 `{"error":{"code":"NoSuchKey","message":"...","requestId":"..."}}`.
 
+## Uploading straight from your web pages
+
+Your app's backend keeps the API key and only signs URLs; the user's browser
+sends the file directly to BlobFish, so large uploads never pass through
+your app. Allow your site first: `"cors_allowed_origins": ["https://app.example.com"]`.
+
+```js
+// Backend (has the key): sign an upload URL for this user.
+const r = await fetch("https://files.example.com/v1/presign", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${process.env.BLOBFISH_KEY}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ bucket: "uploads", key: `users/${userId}/${crypto.randomUUID()}`, method: "PUT", expiresIn: 600 }),
+});
+const { url } = await r.json();   // send this URL to the browser
+
+// Browser (no key): upload the picked file straight to BlobFish.
+const res = await fetch(url, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
+const sha256 = res.headers.get("ETag");   // tell your backend it's done
+```
+
+Pages on other sites are refused by the browser. Mobile apps, scripts and
+servers aren't browsers, so they need no CORS setting at all.
+
 ## Production
 
 BlobFish speaks plain HTTP: run it on `127.0.0.1` behind Caddy, which adds
@@ -109,6 +132,7 @@ See `blobfish.example.json`.
 | `max_connections` (extra clients wait in the accept queue) | `BLOBFISH_MAX_CONNECTIONS` | `1000` |
 | `min_free_space` (bytes uploads never use, so deletes always fit; 0 = off) | `BLOBFISH_MIN_FREE_SPACE` | `536870912` (512 MiB) |
 | `trusted_proxies` (reverse proxies whose `X-Forwarded-For`/`-Proto` are believed) | `BLOBFISH_TRUSTED_PROXIES` (comma-separated) | none |
+| `cors_allowed_origins` (web pages allowed to call BlobFish from the browser, e.g. `["https://app.example.com"]`; `"*"` = any) | `BLOBFISH_CORS_ALLOWED_ORIGINS` (comma-separated) | none |
 
 ## License
 
