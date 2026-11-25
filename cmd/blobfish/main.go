@@ -12,17 +12,22 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/nitishkdas/blobfish/internal/config"
+	"github.com/nitishkdas/blobfish/internal/engine"
 	"github.com/nitishkdas/blobfish/internal/server"
 )
 
 // version is set at build time with -ldflags "-X main.version=v1.2.3".
 var version = "dev"
 
-const shutdownTimeout = 15 * time.Second
+const (
+	shutdownTimeout = 15 * time.Second
+	janitorInterval = time.Hour
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -57,9 +62,20 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		return err
 	}
 
-	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
-		return fmt.Errorf("create data dir: %w", err)
+	// Open runs the janitor once, so leftovers from a crash are gone before
+	// the first request.
+	eng, err := engine.Open(cfg.DataDir, engine.Options{Logger: log})
+	if err != nil {
+		return err
 	}
+	defer eng.Close()
+
+	janitorCtx, stopJanitor := context.WithCancel(context.Background())
+	var janitor sync.WaitGroup
+	janitor.Go(func() { eng.JanitorLoop(janitorCtx, janitorInterval) })
+	// Stop the janitor before the deferred Close runs.
+	defer janitor.Wait()
+	defer stopJanitor()
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {

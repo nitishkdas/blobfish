@@ -137,6 +137,9 @@ CI (`.github/workflows/ci.yml`) runs gofmt, vet, race tests, then builds linux a
 - `cmd/blobfish` – thin `main`; `run()` holds the logic so it is testable (flags, config, listener, graceful shutdown on SIGTERM).
 - `internal/config` – defaults → JSON file (`-config` / `BLOBFISH_CONFIG`, unknown fields rejected) → `BLOBFISH_*` env. `Load` takes `getenv` explicitly.
 - `internal/server` – router (`net/http` patterns), middleware chain (request ID → access log → recover → body limit), and the one JSON error writer plus stable error codes in `errors.go`. New error codes go there.
+- `internal/store` – `Store`/`Buckets` interfaces, value types, sentinel errors (`ErrNoSuchKey`, …), name/key/range validation. Frontends import only this.
+- `internal/engine` – the implementation. bbolt buckets: `buckets` (name→record), `objects/<bucket>` (nested; key→JSON record with blob ID), `blobs` (index of committed blob IDs). A blob file not in `blobs` is an orphan; the janitor deletes it (at `Open` and hourly). Running Puts register tmp names/blob IDs in `inflight` so the janitor skips them; keep "track before rename, untrack after commit".
+- Crash tests: `e.crash` hook stops a write dead at named points (`put:written|synced|renamed|committed`, `delete:committed`); `TestCrashPoints` reopens and checks old-or-new + no orphans. `TestKill9DuringWrites` SIGKILLs a child process (`TestCrashChild`) mid-write; skipped with `-short`. New write-path steps need a new crash point and table row.
 - Request IDs are ULIDs generated server-side (client IDs ignored), returned in `X-Request-Id` and in error bodies.
 - `http.Server` has only `ReadHeaderTimeout`/`IdleTimeout`; no Read/Write timeouts because bodies are multi-GB streams.
 
