@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
 	"github.com/nitishkdas/blobfish/internal/engine"
@@ -48,6 +50,7 @@ func newTestAPI(t *testing.T) *testAPI {
 		Store:         eng,
 		Buckets:       eng,
 		Auth:          svc,
+		Links:         eng,
 		PublicURL:     "https://files.example.com",
 	})
 	return &testAPI{t: t, h: h, auth: svc, eng: eng, admin: admin}
@@ -443,7 +446,7 @@ func TestCorruptDownloadAborts(t *testing.T) {
 	svc := auth.NewService(eng, eng.PresignSecret())
 	admin, _ := svc.EnsureAdminKey(context.Background())
 	srv := httptest.NewServer(New(Options{Logger: slog.New(slog.DiscardHandler), MaxObjectSize: 1 << 20,
-		Store: eng, Buckets: eng, Auth: svc}))
+		Store: eng, Buckets: eng, Auth: svc, Links: eng}))
 	defer srv.Close()
 
 	ctx := context.Background()
@@ -609,4 +612,189 @@ func TestWhoami(t *testing.T) {
 	}
 	// A presigned URL is not a key and cannot ask who it is.
 	a.must(http.StatusUnauthorized, "GET", "/v1/whoami?exp=9999999999&sig=00", "", nil)
+}
+
+func createLinkJSON(t *testing.T, a *testAPI, token, bucket, key string, expiresIn int64, want int) linkJSON {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"bucket": bucket, "key": key, "expiresIn": expiresIn})
+	rr := a.must(want, "POST", "/v1/links", token, strings.NewReader(string(body)))
+	var l linkJSON
+	json.Unmarshal(rr.Body.Bytes(), &l)
+	return l
+}
+
+// linkPath turns a link URL into a request path for the test handler.
+func linkPath(t *testing.T, l linkJSON) string {
+	t.Helper()
+	u, err := url.Parse(l.URL)
+	if err != nil || u.Host != "files.example.com" || !strings.HasPrefix(u.Path, "/s/") {
+		t.Fatalf("link url %q", l.URL)
+	}
+	return u.EscapedPath()
+}
+
+func TestShareLinks(t *testing.T) {
+	a := newTestAPI(t)
+	a.must(http.StatusCreated, "PUT", "/v1/buckets/shared", a.admin, nil)
+	a.must(http.StatusOK, "PUT", "/v1/b/shared/docs/report%20q1.pdf", a.admin, strings.NewReader("0123456789"),
+		"Content-Type", "application/pdf")
+	reader := a.key("shared:r")
+	writer := a.key("shared:rw")
+	outsider := a.key("other-b:rw")
+
+	// Anyone who can read may share; others may not.
+	forever := createLinkJSON(t, a, reader, "shared", "docs/report q1.pdf", 0, http.StatusCreated)
+	if forever.Expires != nil || forever.ID == "" || !strings.HasSuffix(forever.URL, "/report%20q1.pdf") {
+		t.Fatalf("permanent link = %+v", forever)
+	}
+	createLinkJSON(t, a, outsider, "shared", "docs/report q1.pdf", 0, http.StatusForbidden)
+	createLinkJSON(t, a, "", "shared", "docs/report q1.pdf", 0, http.StatusUnauthorized)
+	createLinkJSON(t, a, reader, "shared", "docs/missing.pdf", 0, http.StatusNotFound)
+	createLinkJSON(t, a, reader, "shared", "docs/report q1.pdf", -5, http.StatusBadRequest)
+
+	p := linkPath(t, forever)
+	t.Run("fetch without a key", func(t *testing.T) {
+		rr := a.must(http.StatusOK, "GET", p, "", nil)
+		h := rr.Header()
+		if rr.Body.String() != "0123456789" || h.Get("Content-Type") != "application/pdf" ||
+			!strings.Contains(h.Get("Content-Disposition"), "report q1.pdf") || h.Get("Cache-Control") != "private, no-cache" {
+			t.Errorf("body %q headers %v", rr.Body, h)
+		}
+		if rr := a.must(http.StatusPartialContent, "GET", p, "", nil, "Range", "bytes=2-4"); rr.Body.String() != "234" {
+			t.Errorf("range body %q", rr.Body)
+		}
+		a.must(http.StatusOK, "HEAD", p, "", nil)
+		a.must(http.StatusNotModified, "GET", p, "", nil, "If-None-Match", h.Get("ETag"))
+		// The trailing name is cosmetic; the bare token works too.
+		a.must(http.StatusOK, "GET", strings.Join(strings.Split(p, "/")[:3], "/"), "", nil)
+	})
+
+	t.Run("bad tokens", func(t *testing.T) {
+		if c := errCode(t, a.must(http.StatusNotFound, "GET", "/s/not-a-real-token", "", nil)); c != CodeNoSuchLink {
+			t.Errorf("code %s", c)
+		}
+		// Share links are read-only: other methods don't route (404, like
+		// any unrouted method in the API).
+		a.must(http.StatusNotFound, "PUT", p, "", strings.NewReader("x"))
+		a.must(http.StatusNotFound, "DELETE", p, "", nil)
+	})
+
+	t.Run("expired link", func(t *testing.T) {
+		l := createLinkJSON(t, a, reader, "shared", "docs/report q1.pdf", 3600, http.StatusCreated)
+		if l.Expires == nil || time.Until(*l.Expires) < 59*time.Minute {
+			t.Fatalf("expires = %v", l.Expires)
+		}
+		// Age it in the store instead of sleeping.
+		rec, err := a.eng.LinkByID(context.Background(), l.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.eng.DeleteLink(context.Background(), l.ID)
+		rec.Expires = time.Now().Add(-time.Minute)
+		if err := a.eng.CreateLink(context.Background(), rec); err != nil {
+			t.Fatal(err)
+		}
+		if c := errCode(t, a.must(http.StatusGone, "GET", linkPath(t, l), "", nil)); c != CodeLinkExpired {
+			t.Errorf("code %s", c)
+		}
+	})
+
+	t.Run("list and revoke", func(t *testing.T) {
+		other := createLinkJSON(t, a, writer, "shared", "docs/report q1.pdf", 0, http.StatusCreated)
+		rr := a.must(http.StatusOK, "GET", "/v1/links?bucket=shared&key="+url.QueryEscape("docs/report q1.pdf"), reader, nil)
+		var list struct{ Links []linkJSON }
+		json.Unmarshal(rr.Body.Bytes(), &list)
+		if len(list.Links) != 3 || list.Links[0].CreatedByName != "test" {
+			t.Fatalf("list = %+v", list.Links)
+		}
+		a.must(http.StatusForbidden, "GET", "/v1/links?bucket=shared", outsider, nil)
+		a.must(http.StatusForbidden, "GET", "/v1/links", reader, nil) // all links: admins only
+		a.must(http.StatusOK, "GET", "/v1/links", a.admin, nil)
+
+		// The reader made `forever`, so it may revoke that one, but not the
+		// writer's link; the writer may revoke any link in the bucket.
+		a.must(http.StatusForbidden, "DELETE", "/v1/links/"+other.ID, reader, nil)
+		a.must(http.StatusNoContent, "DELETE", "/v1/links/"+other.ID, writer, nil)
+		a.must(http.StatusNotFound, "GET", linkPath(t, other), "", nil)
+		a.must(http.StatusNoContent, "DELETE", "/v1/links/"+forever.ID, reader, nil)
+		a.must(http.StatusNotFound, "GET", p, "", nil)
+		a.must(http.StatusNotFound, "DELETE", "/v1/links/"+forever.ID, reader, nil)
+	})
+
+	t.Run("follows overwrite, dies with delete", func(t *testing.T) {
+		l := createLinkJSON(t, a, writer, "shared", "docs/report q1.pdf", 0, http.StatusCreated)
+		a.must(http.StatusOK, "PUT", "/v1/b/shared/docs/report%20q1.pdf", writer, strings.NewReader("v2"))
+		if rr := a.must(http.StatusOK, "GET", linkPath(t, l), "", nil); rr.Body.String() != "v2" {
+			t.Errorf("after overwrite: %q", rr.Body)
+		}
+		a.must(http.StatusNoContent, "DELETE", "/v1/b/shared/docs/report%20q1.pdf", writer, nil)
+		a.must(http.StatusOK, "PUT", "/v1/b/shared/docs/report%20q1.pdf", writer, strings.NewReader("v3"))
+		a.must(http.StatusNotFound, "GET", linkPath(t, l), "", nil)
+	})
+
+	t.Run("html via link stays sandboxed", func(t *testing.T) {
+		a.must(http.StatusOK, "PUT", "/v1/b/shared/x.html", writer, strings.NewReader("<script>1</script>"), "Content-Type", "text/html")
+		l := createLinkJSON(t, a, writer, "shared", "x.html", 0, http.StatusCreated)
+		if csp := a.must(http.StatusOK, "GET", linkPath(t, l), "", nil).Header().Get("Content-Security-Policy"); csp != "sandbox" {
+			t.Errorf("CSP = %q", csp)
+		}
+	})
+}
+
+func TestPublicBuckets(t *testing.T) {
+	a := newTestAPI(t)
+	a.must(http.StatusCreated, "PUT", "/v1/buckets/assets", a.admin, nil)
+	a.must(http.StatusOK, "PUT", "/v1/b/assets/img/logo.svg", a.admin, strings.NewReader("<svg/>"), "Content-Type", "image/svg+xml")
+	bucketAdmin := a.key("assets:admin")
+	writer := a.key("assets:rw")
+
+	setPublic := func(token string, public bool, want int) {
+		t.Helper()
+		a.must(want, "PATCH", "/v1/buckets/assets", token, strings.NewReader(fmt.Sprintf(`{"public":%v}`, public)))
+	}
+
+	// Private by default: no key, no file.
+	a.must(http.StatusUnauthorized, "GET", "/v1/b/assets/img/logo.svg", "", nil)
+
+	setPublic(writer, true, http.StatusForbidden) // rw is not bucket admin
+	setPublic("", true, http.StatusUnauthorized)
+	a.must(http.StatusBadRequest, "PATCH", "/v1/buckets/assets", bucketAdmin, strings.NewReader(`{}`))
+	setPublic(bucketAdmin, true, http.StatusOK)
+
+	tests := []struct {
+		name, method, path string
+		want               int
+	}{
+		{"read without key", "GET", "/v1/b/assets/img/logo.svg", 200},
+		{"head without key", "HEAD", "/v1/b/assets/img/logo.svg", 200},
+		{"missing file is 404", "GET", "/v1/b/assets/img/nope.svg", 404},
+		{"listing still needs a key", "GET", "/v1/b/assets", 401},
+		{"upload still needs a key", "PUT", "/v1/b/assets/img/evil.svg", 401},
+		{"delete still needs a key", "DELETE", "/v1/b/assets/img/logo.svg", 401},
+		{"private bucket unaffected", "GET", "/v1/b/secret-b/x", 401},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := a.must(tt.want, tt.method, tt.path, "", strings.NewReader("x"))
+			if tt.want == 200 && tt.method == "GET" && rr.Header().Get("Content-Security-Policy") != "sandbox" {
+				t.Error("public SVG served without sandbox CSP")
+			}
+		})
+	}
+	if cc := a.must(200, "GET", "/v1/b/assets/img/logo.svg", "", nil).Header().Get("Cache-Control"); cc != "public, no-cache" {
+		t.Errorf("anonymous public read Cache-Control = %q", cc)
+	}
+	if cc := a.must(200, "GET", "/v1/b/assets/img/logo.svg", a.admin, nil).Header().Get("Cache-Control"); cc != "private, no-cache" {
+		t.Errorf("keyed read Cache-Control = %q", cc)
+	}
+	// A wrong key is still an error, not a silent fallback to public.
+	a.must(http.StatusUnauthorized, "GET", "/v1/b/assets/img/logo.svg", "bf_wrong", nil)
+
+	rr := a.must(http.StatusOK, "GET", "/v1/buckets", a.admin, nil)
+	if !strings.Contains(rr.Body.String(), `"name":"assets","created"`) || !strings.Contains(rr.Body.String(), `"public":true`) {
+		t.Errorf("bucket list = %s", rr.Body)
+	}
+
+	setPublic(bucketAdmin, false, http.StatusOK)
+	a.must(http.StatusUnauthorized, "GET", "/v1/b/assets/img/logo.svg", "", nil)
 }

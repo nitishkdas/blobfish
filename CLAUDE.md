@@ -87,6 +87,7 @@ All endpoints under `/v1`, `Authorization: Bearer <key>`, JSON for everything ex
 | --- | --- | --- |
 | PUT | `/v1/buckets/{bucket}` | Create bucket (admin) |
 | DELETE | `/v1/buckets/{bucket}` | Delete bucket (must be empty) |
+| PATCH | `/v1/buckets/{bucket}` | `{"public": true\|false}` (bucket admin). Public: object GET/HEAD work without a key; listing/writes still need one |
 | GET | `/v1/buckets` | List buckets |
 | PUT | `/v1/b/{bucket}/{key...}` | Upload object (raw body; Content-Type stored; optional `X-Meta-*`) |
 | GET | `/v1/b/{bucket}/{key...}` | Download (supports `Range`, `If-None-Match`) |
@@ -94,10 +95,15 @@ All endpoints under `/v1`, `Authorization: Bearer <key>`, JSON for everything ex
 | DELETE | `/v1/b/{bucket}/{key...}` | Delete (idempotent) |
 | GET | `/v1/b/{bucket}?prefix=&delimiter=/&cursor=&limit=` | List objects, paginated |
 | POST | `/v1/presign` | Presigned URL (bucket, key, method GET/PUT, expiry seconds) |
+| POST/GET/DELETE | `/v1/links`, `/v1/links/{id}` | Share links: create (read access; `expiresIn` 0 = never), list per object/bucket, revoke (creator or bucket writer) |
+| GET | `/s/{token}[/{name}]` | Serve a share link, no key. 404 `NoSuchLink` if revoked/deleted, 410 `LinkExpired` |
+| GET | `/v1/whoami` | Key id, name, scopes, max object size (drives the web UI) |
 | POST/GET/DELETE | `/v1/keys` | Manage API keys (admin) |
 | GET | `/healthz` | Health check, no auth |
 
 - **API keys**: random 32-byte tokens, only SHA-256 hash stored. Scopes like `invoices:rw`, `*:admin`.
+- **Share links** live in bbolt (`links`, `linkidx`), token stored as-is so the UI can re-show links. Deleting an object deletes its links in the same transaction (a re-upload never revives them); overwriting keeps them.
+- **Caching**: object responses send `Cache-Control: private, no-cache` (`public, no-cache` for anonymous public reads) so revocation and public→private apply immediately; ETag makes revalidation a cheap 304.
 - **Presigned URLs**: query params `exp` + `sig`, where `sig = hex(HMAC-SHA256(server_secret, method NUL bucket NUL key NUL exp NUL))`. NUL separators keep it unambiguous (keys may contain anything but NUL). HEAD may use a GET signature. Max expiry 7 days. Server checks signature, then expiry; no key needed. The secret is generated once and stored in `meta.db` `settings`.
 - **Errors**: one shape everywhere, stable codes:
   ```json

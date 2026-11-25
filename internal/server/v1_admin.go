@@ -34,6 +34,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 type bucketJSON struct {
 	Name    string    `json:"name"`
 	Created time.Time `json:"created"`
+	Public  bool      `json:"public"`
+}
+
+func toBucketJSON(b store.BucketInfo) bucketJSON {
+	return bucketJSON{Name: b.Name, Created: b.Created, Public: b.Public}
 }
 
 func (a *api) createBucket(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +50,7 @@ func (a *api) createBucket(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, bucketJSON{Name: info.Name, Created: info.Created})
+	writeJSON(w, http.StatusCreated, toBucketJSON(info))
 }
 
 func (a *api) deleteBucket(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +80,7 @@ func (a *api) listBuckets(w http.ResponseWriter, r *http.Request) {
 	out := []bucketJSON{}
 	for _, b := range all {
 		if p.Can(auth.PermRead, b.Name, "") {
-			out = append(out, bucketJSON{Name: b.Name, Created: b.Created})
+			out = append(out, toBucketJSON(b))
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string][]bucketJSON{"buckets": out})

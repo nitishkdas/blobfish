@@ -2,10 +2,11 @@
 
 import { api, bucketPath, loadPref, objectPath, presign, savePref, showError } from "./api.js";
 import {
-  ask, baseName, confirmDialog, copyText, dateFmt, dateFmtLong, formatInt, formatSize, h, icon, iconButton, toast,
+  ask, baseName, confirmDialog, copyText, dateFmt, dateFmtLong, formatInt, formatSize, h, icon, iconButton,
+  relativeTime, toast,
 } from "./dom.js";
 import { navigate } from "./router.js";
-import { PAGE_SIZES, can, rerenderMain, state, ui } from "./state.js";
+import { PAGE_SIZES, bucketInfo, can, rerenderMain, state, ui } from "./state.js";
 import { pickAndUpload, wireDrop } from "./uploads.js";
 
 // ---------- Loading ----------
@@ -84,13 +85,19 @@ export function renderFiles() {
   const canWrite = can("w", r.bucket);
   if (canWrite) wireDrop(main);
 
+  const isPublic = bucketInfo(r.bucket)?.public;
   main.append(
     h("div", { class: "toolbar" },
       renderCrumbs(),
+      isPublic && h("span", { class: "chip public-chip", title: "Files in this bucket can be read without a key" },
+        icon("globe", 14), "Public"),
       h("div", { class: "toolbar-actions" },
         canWrite && h("button", { class: "with-icon", onclick: newFolder }, icon("folderPlus"), "New folder"),
         canWrite && h("button", { class: "with-icon", onclick: () => pickAndUpload({ folder: true }) }, icon("folder"), "Upload folder"),
         canWrite && h("button", { class: "primary with-icon", onclick: () => pickAndUpload({ folder: false }) }, icon("upload"), "Upload"),
+        can("admin", r.bucket) && !r.prefix && h("button", {
+          class: "link", onclick: () => setVisibility(!isPublic),
+        }, isPublic ? "Make private" : "Make public"),
         can("admin", r.bucket) && !r.prefix && h("button", {
           class: "link danger", onclick: deleteBucket, title: "Only empty buckets can be deleted",
         }, "Delete bucket"))),
@@ -211,20 +218,111 @@ async function download(o) {
   } catch (err) { showError(err); }
 }
 
+function publicURL(key) {
+  return location.origin + objectPath(state.route.bucket, key);
+}
+
+// share opens the share dialog: the public URL when the bucket is public,
+// the file's share links (copy any time, revoke), and a form for new ones.
 async function share(o) {
+  const bucket = state.route.bucket;
   const dialog = document.getElementById("share");
-  const ttl = document.getElementById("share-ttl");
-  const out = document.getElementById("share-url");
-  const make = async () => {
-    out.value = "Creating link…";
-    try {
-      out.value = (await presign(state.route.bucket, o.key, "GET", Number(ttl.value))).url;
-    } catch (err) { out.value = ""; showError(err); }
+  const list = document.getElementById("share-links");
+  document.getElementById("share-title").textContent = `Share “${baseName(o.key)}”`;
+
+  const pub = document.getElementById("share-public");
+  pub.hidden = !bucketInfo(bucket)?.public;
+  if (!pub.hidden) {
+    const field = document.getElementById("share-public-url");
+    field.value = publicURL(o.key);
+    document.getElementById("share-public-copy").onclick = () => copyText(field.value, "Public link copied", field);
+  }
+
+  let links = [];
+  const render = () => {
+    if (links.length === 0) {
+      list.replaceChildren(h("li", { class: "muted share-none" }, "No share links yet."));
+      return;
+    }
+    list.replaceChildren(...links.map((l) => {
+      const field = h("input", { class: "mono", readonly: true, value: l.url, "aria-label": "Share link" });
+      const expires = l.expires ? new Date(l.expires) : null;
+      const expired = expires && expires < new Date();
+      const mayRevoke = l.createdBy === state.me.keyId || can("w", bucket);
+      return h("li", { class: expired ? "share-link expired" : "share-link" },
+        h("div", { class: "share-link-row" },
+          field,
+          iconButton("copy", "Copy link", () => copyText(l.url, "Link copied", field)),
+          mayRevoke && iconButton("trash", "Revoke link", () => revoke(l), "danger")),
+        h("span", { class: "share-meta" },
+          expires ? (expired ? `Expired ${relativeTime(expires)}` : `Expires ${relativeTime(expires)}`) : "Never expires",
+          ` · created ${relativeTime(new Date(l.created))}`,
+          l.createdByName && ` by ${l.createdByName}`));
+    }));
   };
-  ttl.onchange = make;
-  document.getElementById("share-copy").onclick = () => copyText(out.value, "Link copied", out);
+  const load = async () => {
+    try {
+      const q = new URLSearchParams({ bucket, key: o.key });
+      links = (await api("GET", `/v1/links?${q}`)).links;
+    } catch (err) { showError(err); links = []; }
+    render();
+  };
+  const revoke = async (l) => {
+    const ok = await confirmDialog({
+      title: "Revoke this link?",
+      body: [h("p", { class: "mono confirm-target" }, l.url), "Anyone using it loses access immediately."],
+      confirmLabel: "Revoke link",
+    });
+    if (!ok) return;
+    try {
+      await api("DELETE", `/v1/links/${encodeURIComponent(l.id)}`);
+      toast("Link revoked");
+    } catch (err) { showError(err); }
+    await load();
+  };
+
+  const create = document.getElementById("share-create");
+  create.onclick = async () => {
+    const ttl = Number(document.getElementById("share-ttl").value);
+    create.disabled = true;
+    try {
+      const l = await api("POST", "/v1/links", { body: { bucket, key: o.key, expiresIn: ttl } });
+      await load();
+      await copyText(l.url, ttl === 0 ? "Permanent link created and copied" : "Link created and copied");
+    } catch (err) {
+      showError(err);
+    } finally {
+      create.disabled = false;
+    }
+  };
+
+  list.replaceChildren(h("li", { class: "muted share-none" }, "Loading…"));
   dialog.showModal();
-  await make();
+  await load();
+}
+
+async function setVisibility(makePublic) {
+  const bucket = state.route.bucket;
+  const ok = await confirmDialog(makePublic ? {
+    title: `Make “${bucket}” public?`,
+    body: [
+      "Anyone who has, or guesses, a file's address can download it without a key. Listing, uploading and deleting still need a key.",
+      "Use this for website or app assets, not for private documents.",
+    ],
+    confirmLabel: "Make public",
+  } : {
+    title: `Make “${bucket}” private?`,
+    body: ["Public addresses to its files stop working immediately. Share links keep working."],
+    confirmLabel: "Make private",
+    danger: false,
+  });
+  if (!ok) return;
+  try {
+    await api("PATCH", `/v1/buckets/${encodeURIComponent(bucket)}`, { body: { public: makePublic } });
+    state.buckets = (await api("GET", "/v1/buckets")).buckets;
+    toast(makePublic ? `${bucket} is now public` : `${bucket} is now private`);
+    ui.renderApp();
+  } catch (err) { showError(err); }
 }
 
 function showDetails(o) {
@@ -237,6 +335,9 @@ function showDetails(o) {
     row("Size", `${formatSize(o.size)} `, h("span", { class: "muted" }, `(${formatInt(o.size)} bytes)`)),
     row("Type", h("span", { class: "mono" }, o.contentType)),
     row("Modified", dateFmtLong.format(new Date(o.modified))),
+    bucketInfo(state.route.bucket)?.public && row("Public URL",
+      h("span", { class: "mono break" }, publicURL(o.key)),
+      iconButton("copy", "Copy public URL", () => copyText(publicURL(o.key), "Public URL copied"), "inline-copy")),
     row("SHA-256",
       h("span", { class: "mono break" }, o.etag),
       iconButton("copy", "Copy SHA-256", () => copyText(o.etag, "Checksum copied"), "inline-copy")),

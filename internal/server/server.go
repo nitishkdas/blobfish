@@ -21,6 +21,7 @@ type Options struct {
 	Store         store.Store
 	Buckets       store.Buckets
 	Auth          *auth.Service
+	Links         store.Links
 	// PublicURL is the base for presigned URLs; empty means "use the Host
 	// header of the presign request".
 	PublicURL string
@@ -32,6 +33,7 @@ type api struct {
 	store     store.Store
 	buckets   store.Buckets
 	auth      *auth.Service
+	links     store.Links
 	publicURL string
 	maxObject int64
 }
@@ -43,6 +45,7 @@ func New(opts Options) http.Handler {
 		store:     opts.Store,
 		buckets:   opts.Buckets,
 		auth:      opts.Auth,
+		links:     opts.Links,
 		publicURL: strings.TrimSuffix(opts.PublicURL, "/"),
 		maxObject: opts.MaxObjectSize,
 	}
@@ -53,6 +56,14 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET /v1/buckets", a.listBuckets)
 	mux.HandleFunc("PUT /v1/buckets/{bucket}", a.createBucket)
 	mux.HandleFunc("DELETE /v1/buckets/{bucket}", a.deleteBucket)
+	mux.HandleFunc("PATCH /v1/buckets/{bucket}", a.updateBucket)
+	mux.HandleFunc("POST /v1/links", a.createLink)
+	mux.HandleFunc("GET /v1/links", a.listLinks)
+	mux.HandleFunc("DELETE /v1/links/{id}", a.deleteLink)
+	// Share links: /s/<token>, optionally followed by a file name that only
+	// makes the URL readable and is ignored.
+	mux.HandleFunc("GET /s/{token}", a.serveLink)
+	mux.HandleFunc("GET /s/{token}/{name...}", a.serveLink)
 	mux.HandleFunc("POST /v1/presign", a.presign)
 	mux.HandleFunc("GET /v1/keys", a.listKeys)
 	mux.HandleFunc("POST /v1/keys", a.createKey)

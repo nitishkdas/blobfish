@@ -4,7 +4,8 @@
 // Layout under the data dir:
 //
 //	meta.db              bbolt: "buckets", "objects/<bucket>/<key>", "blobs/<id>",
-//	                     "keys/<token hash>", "settings"
+//	                     "keys/<token hash>", "settings",
+//	                     "links/<token>", "linkidx/<bucket>\x00<key>\x00<id>" -> token
 //	objects/ab/cd/<id>   object bytes, random 32-hex-char IDs
 //	tmp/                 uploads in progress
 //
@@ -79,6 +80,7 @@ type Engine struct {
 
 type bucketRecord struct {
 	Created time.Time `json:"created"`
+	Public  bool      `json:"public,omitempty"`
 }
 
 type objectRecord struct {
@@ -128,7 +130,7 @@ func Open(dir string, opts Options) (*Engine, error) {
 		return nil, fmt.Errorf("open meta.db (is another blobfish using %s?): %w", dir, err)
 	}
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings} {
+		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}

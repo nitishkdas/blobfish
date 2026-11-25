@@ -111,6 +111,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			Store:         eng,
 			Buckets:       eng,
 			Auth:          authSvc,
+			Links:         eng,
 			PublicURL:     cfg.PublicURL,
 		}),
 		// Only the header read is bounded. Bodies can be multi-GB streams on

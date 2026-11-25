@@ -36,6 +36,7 @@ const ICONS = {
   folder: ["M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"],
   folderPlus: ["M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", "M12 10.5v5", "M9.5 13h5"],
   copy: ["M9 9h10v10H9z", "M5 15V5h10"],
+  globe: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18", "M3.5 12h17", "M12 3c2.4 2.5 3.6 5.5 3.6 9s-1.2 6.5-3.6 9", "M12 3c-2.4 2.5-3.6 5.5-3.6 9s1.2 6.5 3.6 9"],
   signOut: ["M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3", "M16 8l4 4-4 4", "M20 12H10"],
   file: ["M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M14 3v5h5"],
 };
@@ -77,6 +78,19 @@ export function formatSize(n) {
 export function formatInt(n) { return intFmt.format(n); }
 export const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 export const dateFmtLong = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "medium" });
+
+const relFmt = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+// relativeTime formats a date as "in 6 days", "2 hours ago" and so on.
+export function relativeTime(date) {
+  let secs = (date.getTime() - Date.now()) / 1000;
+  for (const [unit, size] of [["second", 60], ["minute", 60], ["hour", 24], ["day", 30], ["month", 12], ["year", Infinity]]) {
+    // Round before comparing, so 59.99 minutes reads "in 1 hour", not "in 60 minutes".
+    const n = Math.round(secs);
+    if (Math.abs(n) < size) return relFmt.format(n, unit);
+    secs /= size;
+  }
+  return "";
+}
 
 export function baseName(key) { return key.slice(key.lastIndexOf("/") + 1) || key; }
 export function dirOf(key) { return key.slice(0, key.lastIndexOf("/") + 1); }

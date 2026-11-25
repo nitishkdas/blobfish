@@ -1,0 +1,198 @@
+package server
+
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"mime"
+	"net/http"
+	"net/url"
+	"path"
+	"time"
+
+	"github.com/nitishkdas/blobfish/internal/auth"
+	"github.com/nitishkdas/blobfish/internal/store"
+)
+
+// maxLinkLifetime caps an expiring share link; 0 means "never expires".
+const maxLinkLifetime = 10 * 365 * 24 * time.Hour
+
+type linkJSON struct {
+	ID            string     `json:"id"`
+	URL           string     `json:"url"`
+	Bucket        string     `json:"bucket"`
+	Key           string     `json:"key"`
+	Created       time.Time  `json:"created"`
+	Expires       *time.Time `json:"expires"` // null = never
+	CreatedBy     string     `json:"createdBy"`
+	CreatedByName string     `json:"createdByName"`
+}
+
+func (a *api) toLinkJSON(r *http.Request, l store.LinkRecord) linkJSON {
+	out := linkJSON{
+		ID: l.ID, Bucket: l.Bucket, Key: l.Key, Created: l.Created,
+		CreatedBy: l.CreatedBy, CreatedByName: l.CreatedByName,
+		// The trailing file name is cosmetic: it makes links readable and
+		// gives downloads a sensible default name.
+		URL: a.baseURL(r) + "/s/" + l.Token + "/" + url.PathEscape(path.Base(l.Key)),
+	}
+	if !l.Expires.IsZero() {
+		exp := l.Expires
+		out.Expires = &exp
+	}
+	return out
+}
+
+// createLink makes a share link to one object. Anyone who can read the
+// object may share it, the same rule as for presigned GET URLs.
+func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
+	p, err := a.auth.Authenticate(r, auth.Target{})
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	var req struct {
+		Bucket    string `json:"bucket"`
+		Key       string `json:"key"`
+		ExpiresIn int64  `json:"expiresIn"` // seconds; 0 = never expires
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if !p.Can(auth.PermRead, req.Bucket, req.Key) {
+		a.fail(w, r, errAccessDenied)
+		return
+	}
+	if err := store.ValidateBucketName(req.Bucket); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if err := store.ValidateKey(req.Key); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	lifetime := time.Duration(req.ExpiresIn) * time.Second
+	if req.ExpiresIn < 0 || lifetime > maxLinkLifetime {
+		a.fail(w, r, badRequest("expiresIn must be 0 (never) or up to %d seconds", int64(maxLinkLifetime/time.Second)))
+		return
+	}
+
+	var tok [16]byte
+	rand.Read(tok[:])
+	var id [8]byte
+	rand.Read(id[:])
+	now := time.Now().UTC()
+	rec := store.LinkRecord{
+		ID: hex.EncodeToString(id[:]), Token: base64.RawURLEncoding.EncodeToString(tok[:]),
+		Bucket: req.Bucket, Key: req.Key, Created: now,
+		CreatedBy: p.KeyID, CreatedByName: p.KeyName,
+	}
+	if lifetime > 0 {
+		rec.Expires = now.Add(lifetime).Truncate(time.Second)
+	}
+	if err := a.links.CreateLink(r.Context(), rec); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, a.toLinkJSON(r, rec))
+}
+
+// listLinks lists links for one object or one bucket (read access needed),
+// or for everything (server admins only).
+func (a *api) listLinks(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	bucket, key := q.Get("bucket"), q.Get("key")
+	t := auth.Target{Bucket: bucket}
+	perm := auth.PermRead
+	if bucket == "" {
+		t, perm = serverWide, auth.PermAdmin
+	}
+	if _, ok := a.authorize(w, r, t, perm); !ok {
+		return
+	}
+	recs, err := a.links.ListLinks(r.Context(), bucket, key)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	out := make([]linkJSON, 0, len(recs))
+	for _, l := range recs {
+		out = append(out, a.toLinkJSON(r, l))
+	}
+	writeJSON(w, http.StatusOK, map[string][]linkJSON{"links": out})
+}
+
+// deleteLink revokes a link. Allowed for the key that created it, or any
+// key that can write the bucket.
+func (a *api) deleteLink(w http.ResponseWriter, r *http.Request) {
+	p, err := a.auth.Authenticate(r, auth.Target{})
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	rec, err := a.links.LinkByID(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if rec.CreatedBy != p.KeyID && !p.Can(auth.PermWrite, rec.Bucket, "") {
+		a.fail(w, r, errAccessDenied)
+		return
+	}
+	if err := a.links.DeleteLink(r.Context(), rec.ID); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// serveLink is the public side of a share link: no key, just the token.
+func (a *api) serveLink(w http.ResponseWriter, r *http.Request) {
+	rec, err := a.links.LinkByToken(r.Context(), r.PathValue("token"))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if !rec.Expires.IsZero() && time.Now().After(rec.Expires) {
+		a.fail(w, r, fmt.Errorf("%w on %s", errLinkExpired, rec.Expires.Format(time.RFC3339)))
+		return
+	}
+	name := path.Base(rec.Key)
+	a.serveObject(w, r, auth.Target{Bucket: rec.Bucket, Key: rec.Key}, func(h http.Header) {
+		h.Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))
+		// Revalidate every time (cheap, via ETag) so a revoked link stops
+		// working at once; never stored by shared caches.
+		h.Set("Cache-Control", "private, no-cache")
+		h.Set("X-Robots-Tag", "noindex")
+		h.Set("Referrer-Policy", "no-referrer")
+	})
+}
+
+// updateBucket changes bucket settings; today only public visibility.
+func (a *api) updateBucket(w http.ResponseWriter, r *http.Request) {
+	bucket := r.PathValue("bucket")
+	if _, ok := a.authorize(w, r, auth.Target{Bucket: bucket}, auth.PermAdmin); !ok {
+		return
+	}
+	var req struct {
+		Public *bool `json:"public"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if req.Public == nil {
+		a.fail(w, r, badRequest(`nothing to change: send {"public": true|false}`))
+		return
+	}
+	info, err := a.buckets.SetBucketPublic(r.Context(), bucket, *req.Public)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.log.InfoContext(r.Context(), "bucket visibility changed",
+		"request_id", RequestID(r.Context()), "bucket", bucket, "public", info.Public)
+	writeJSON(w, http.StatusOK, toBucketJSON(info))
+}

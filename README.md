@@ -49,6 +49,12 @@ curl -X POST -H "$H" -d '{"name":"billing app","scopes":["invoices:rw"]}' localh
 # A link anyone can use for one hour, no key needed:
 curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","method":"GET","expiresIn":3600}' \
      localhost:8080/v1/presign
+
+# Permanent link that anyone can open until you revoke it (expiresIn 0 = never):
+curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","expiresIn":0}' localhost:8080/v1/links
+
+# Serve a whole bucket's files without a key (e.g. website assets):
+curl -X PATCH -H "$H" -d '{"public":true}' localhost:8080/v1/buckets/site-assets
 ```
 
 Scopes are `<bucket>:<r|w|rw|admin>`, with `*` for every bucket. Creating

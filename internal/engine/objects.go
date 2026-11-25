@@ -248,6 +248,11 @@ func (e *Engine) Delete(ctx context.Context, bucket, key string) error {
 		if err := objs.Delete([]byte(key)); err != nil {
 			return err
 		}
+		// Same transaction: a later upload to this key must not quietly
+		// revive old share links.
+		if err := deleteLinksWithPrefix(tx, linkIdxPrefix(bucket, key)); err != nil {
+			return err
+		}
 		return tx.Bucket(bktBlobs).Delete([]byte(blob))
 	})
 	if err != nil {

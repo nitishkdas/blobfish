@@ -127,7 +127,8 @@ function renderSidebar() {
       h("li", {}, h("a", {
         href: `#/b/${encodeURIComponent(b.name)}/`,
         "aria-current": r.view === "files" && b.name === r.bucket ? "true" : "false",
-      }, b.name))));
+      }, h("span", { class: "bucket-name" }, b.name),
+      b.public && h("span", { class: "public-mark", title: "Public: files can be read without a key" }, icon("globe", 14))))));
 
   let form = null;
   if (isServerAdmin()) {

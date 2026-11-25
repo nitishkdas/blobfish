@@ -181,7 +181,7 @@ dialog::backdrop { background: rgb(0 0 0 / .35); }
 .dialog { display: grid; gap: 12px; padding: 20px; }
 .dialog h2 { margin: 0; font-size: 17px; }
 .dialog p { margin: 0; }
-#share-url { width: 100%; }
+
 
 /* API keys page */
 .top .link[aria-current="page"] { color: var(--accent); font-weight: 600; }
@@ -259,6 +259,27 @@ dl.details dd { margin: 0; min-width: 0; display: flex; align-items: center; gap
 .clash-list { margin: 0; padding-left: 18px; color: var(--text); }
 .clash-list li { word-break: break-all; }
 .chip.you { margin-left: 6px; background: var(--line); }
+
+/* Public buckets */
+.side li a { display: flex; align-items: center; gap: 6px; }
+.bucket-name { overflow: hidden; text-overflow: ellipsis; }
+.public-mark { display: inline-grid; color: var(--accent); flex: none; }
+.public-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); }
+
+/* Share dialog */
+.share-dialog { gap: 14px; }
+.share-dialog .section-title { margin: 0 0 2px; }
+.share-dialog p { margin: 0; }
+.share-public { display: grid; gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--accent-soft); }
+.share-public .row input { flex: 1; min-width: 0; }
+.share-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-height: 260px; overflow: auto; }
+.share-link-row { display: flex; align-items: center; gap: 2px; }
+.share-link-row input { flex: 1; min-width: 0; margin-right: 4px; }
+.share-meta { font-size: 12px; color: var(--muted); }
+.share-link.expired input { text-decoration: line-through; color: var(--muted); }
+.share-none { font-size: 13px; }
+.share-new { align-items: end; flex-wrap: wrap; }
+.share-ttl { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 
 /* Confirm dialog */
 .confirm-body { display: grid; gap: 8px; color: var(--muted); }

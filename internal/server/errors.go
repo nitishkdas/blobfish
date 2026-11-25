@@ -38,6 +38,8 @@ const (
 	CodeInvalidScope      = "InvalidScope"
 	CodeLastAdminKey      = "LastAdminKey"
 	CodeIncompleteBody    = "IncompleteBody"
+	CodeNoSuchLink        = "NoSuchLink"
+	CodeLinkExpired       = "LinkExpired"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This
@@ -58,6 +60,8 @@ var errorMapping = []struct {
 	{store.ErrMetadataTooLarge, http.StatusBadRequest, CodeMetadataTooLarge},
 	{store.ErrDataCorrupt, http.StatusInternalServerError, CodeDataCorrupt},
 	{store.ErrNoSuchAPIKey, http.StatusNotFound, CodeNoSuchAPIKey},
+	{store.ErrNoSuchLink, http.StatusNotFound, CodeNoSuchLink},
+	{errLinkExpired, http.StatusGone, CodeLinkExpired},
 	{auth.ErrUnauthenticated, http.StatusUnauthorized, CodeUnauthorized},
 	{auth.ErrSignatureInvalid, http.StatusForbidden, CodeSignatureInvalid},
 	{auth.ErrSignatureExpired, http.StatusForbidden, CodeSignatureExpired},
@@ -75,6 +79,7 @@ var errorMapping = []struct {
 }
 
 var (
+	errLinkExpired  = errors.New("share link has expired")
 	errAccessDenied = errors.New("access denied")
 	errBadRequest   = errors.New("bad request")
 )

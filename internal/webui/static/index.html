@@ -16,19 +16,33 @@
     <div id="toasts" role="status" aria-live="polite"></div>
   </div>
   <dialog id="share">
-    <form method="dialog" class="dialog">
-      <h2>Share link</h2>
-      <p class="muted">Anyone with this link can download the file until it expires. No API key needed.</p>
-      <label class="field">Expires in
-        <select id="share-ttl">
-          <option value="3600">1 hour</option>
-          <option value="86400" selected>1 day</option>
-          <option value="604800">7 days</option>
-        </select>
-      </label>
-      <input id="share-url" class="mono" readonly aria-label="Share link">
+    <form method="dialog" class="dialog share-dialog">
+      <h2 id="share-title" class="break">Share</h2>
+      <section id="share-public" class="share-public" hidden>
+        <p><strong>Public bucket:</strong> anyone with this address can open the file, permanently, until the bucket is made private.</p>
+        <div class="row">
+          <input id="share-public-url" class="mono" readonly aria-label="Public link">
+          <button type="button" id="share-public-copy">Copy</button>
+        </div>
+      </section>
+      <div>
+        <h3 class="section-title">Share links</h3>
+        <p class="muted">Anyone with a link can open the file until it expires or is revoked. No API key needed.</p>
+      </div>
+      <ul id="share-links" class="share-links"></ul>
+      <div class="row share-new">
+        <label class="share-ttl">Expires
+          <select id="share-ttl">
+            <option value="3600">in 1 hour</option>
+            <option value="86400">in 1 day</option>
+            <option value="604800" selected>in 7 days</option>
+            <option value="2592000">in 30 days</option>
+            <option value="0">never</option>
+          </select>
+        </label>
+        <button type="button" id="share-create" class="primary">Create link</button>
+      </div>
       <div class="row end">
-        <button type="button" id="share-copy" class="primary">Copy link</button>
         <button value="close">Close</button>
       </div>
     </form>

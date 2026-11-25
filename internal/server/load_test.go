@@ -38,7 +38,7 @@ func liveServer(t *testing.T, maxObject int64) (url, admin string) {
 	}
 	srv := httptest.NewServer(New(Options{
 		Logger: slog.New(slog.DiscardHandler), MaxObjectSize: maxObject,
-		Store: eng, Buckets: eng, Auth: svc,
+		Store: eng, Buckets: eng, Auth: svc, Links: eng,
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL, admin

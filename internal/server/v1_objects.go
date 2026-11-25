@@ -86,8 +86,45 @@ func (a *api) putObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
 }
 
 func (a *api) getObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
-	if _, ok := a.authorize(w, r, t, auth.PermRead); !ok {
+	ok, public := a.authorizeRead(w, r, t)
+	if !ok {
 		return
+	}
+	var extra func(http.Header)
+	if public {
+		// Shared caches may keep public files, but must revalidate, so
+		// making the bucket private takes effect at once.
+		extra = func(h http.Header) { h.Set("Cache-Control", "public, no-cache") }
+	}
+	a.serveObject(w, r, t, extra)
+}
+
+// authorizeRead allows a read with a key or presigned URL as usual, or with
+// no credentials at all when the bucket is public. A request without
+// credentials on a private or missing bucket gets the usual 401, so a
+// bucket's existence is never revealed.
+//
+// public reports that access was granted only because the bucket is public.
+func (a *api) authorizeRead(w http.ResponseWriter, r *http.Request, t auth.Target) (ok, public bool) {
+	anonymous := r.Header.Get("Authorization") == "" && !r.URL.Query().Has("sig")
+	if anonymous && t.Key != "" {
+		if b, err := a.buckets.GetBucket(r.Context(), t.Bucket); err == nil && b.Public {
+			return true, true
+		}
+	}
+	_, ok = a.authorize(w, r, t, auth.PermRead)
+	return ok, false
+}
+
+// serveObject answers GET or HEAD for an object the caller may read:
+// Range, If-None-Match, checksum-verified full reads. extra, if set, adds
+// headers (for example Content-Disposition on share links).
+func (a *api) serveObject(w http.ResponseWriter, r *http.Request, t auth.Target, extra func(http.Header)) {
+	setHeaders := func(info store.ObjectInfo) {
+		setObjectHeaders(w, info)
+		if extra != nil {
+			extra(w.Header())
+		}
 	}
 
 	if r.Method == http.MethodHead {
@@ -96,7 +133,7 @@ func (a *api) getObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
 			a.fail(w, r, err)
 			return
 		}
-		setObjectHeaders(w, info)
+		setHeaders(info)
 		if etagMatches(r.Header.Get("If-None-Match"), info.ETag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
@@ -129,7 +166,7 @@ func (a *api) getObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
 	}
 	defer rc.Close()
 
-	setObjectHeaders(w, info)
+	setHeaders(info)
 	if etagMatches(r.Header.Get("If-None-Match"), info.ETag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -223,6 +260,10 @@ func setObjectHeaders(w http.ResponseWriter, info store.ObjectInfo) {
 	h.Set("Last-Modified", info.Modified.UTC().Format(http.TimeFormat))
 	h.Set("Accept-Ranges", "bytes")
 	h.Set("X-Content-Type-Options", "nosniff")
+	// Caches must revalidate every time (a cheap 304 thanks to the ETag),
+	// so revoking a key or link, or making a bucket private, takes effect
+	// immediately. "private": shared caches never store these.
+	h.Set("Cache-Control", "private, no-cache")
 	if canRunScript(info.ContentType) {
 		// An uploaded HTML/SVG/XML file opened from this origin could run
 		// script next to the web UI and read its stored API key. The sandbox

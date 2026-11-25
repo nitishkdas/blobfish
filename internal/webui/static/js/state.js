@@ -48,6 +48,8 @@ export function can(perm, bucket) {
 
 export const isServerAdmin = () => can("admin", "*");
 
+export const bucketInfo = (name) => state.buckets.find((b) => b.name === name);
+
 // ---------- Re-rendering ----------
 // Views register their renderers here so modules can ask for a redraw
 // without importing each other.

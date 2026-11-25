@@ -35,6 +35,39 @@ type Buckets interface {
 	// DeleteBucket removes an empty bucket.
 	DeleteBucket(ctx context.Context, name string) error
 	ListBuckets(ctx context.Context) ([]BucketInfo, error)
+	// GetBucket returns ErrNoSuchBucket if name does not exist.
+	GetBucket(ctx context.Context, name string) (BucketInfo, error)
+	// SetBucketPublic makes a bucket's objects readable without a key (or
+	// not). Listing and writing always need a key.
+	SetBucketPublic(ctx context.Context, name string, public bool) (BucketInfo, error)
+}
+
+// Links stores share links: permanent or long-lived URLs to one object
+// that can be revoked one by one. Deleting an object deletes its links.
+type Links interface {
+	CreateLink(ctx context.Context, rec LinkRecord) error
+	// LinkByToken and LinkByID return ErrNoSuchLink when nothing matches.
+	LinkByToken(ctx context.Context, token string) (LinkRecord, error)
+	LinkByID(ctx context.Context, id string) (LinkRecord, error)
+	// ListLinks returns links for one object (key set), one bucket (key
+	// empty) or everything (bucket empty), oldest first.
+	ListLinks(ctx context.Context, bucket, key string) ([]LinkRecord, error)
+	DeleteLink(ctx context.Context, id string) error
+}
+
+// LinkRecord is a stored share link. The token is kept as-is (not hashed
+// like API keys) so the UI can show a link again; anyone able to read the
+// metadata file can read the object files on the same disk anyway.
+type LinkRecord struct {
+	ID     string `json:"id"`
+	Token  string `json:"token"`
+	Bucket string `json:"bucket"`
+	Key    string `json:"key"`
+	// Expires is zero for a link that never expires.
+	Expires       time.Time `json:"expires,omitzero"`
+	Created       time.Time `json:"created"`
+	CreatedBy     string    `json:"createdBy"`     // API key ID
+	CreatedByName string    `json:"createdByName"` // its name at the time
 }
 
 // Keys persists API key records. Only the SHA-256 hash of a token is ever
@@ -83,6 +116,8 @@ type ObjectInfo struct {
 type BucketInfo struct {
 	Name    string
 	Created time.Time
+	// Public buckets serve GET/HEAD of their objects without a key.
+	Public bool
 }
 
 // ListOptions controls a List call.
@@ -130,4 +165,5 @@ var (
 	ErrMetadataTooLarge  = errors.New("user metadata too large")
 	ErrDataCorrupt       = errors.New("stored data failed integrity check")
 	ErrNoSuchAPIKey      = errors.New("API key not found")
+	ErrNoSuchLink        = errors.New("share link not found")
 )
