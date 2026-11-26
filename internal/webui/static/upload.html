@@ -15,13 +15,14 @@
     <img src="/ui/favicon.svg" alt="">
     <h1 id="title">Upload files</h1>
     <p class="muted" id="limits">Loading…</p>
+    <p class="drop-operator" id="operator" hidden></p>
     <section id="drop" class="drop-zone" hidden>
       <p>Drop files here, or</p>
       <label class="button primary">Choose files<input type="file" id="pick" multiple class="visually-hidden"></label>
     </section>
-    <ul id="files" class="drop-files" aria-live="polite"></ul>
-    <p class="muted drop-foot">Files you send can't be seen, changed or deleted through this page. Sent with BlobFish.</p>
+    <ul id="files" class="drop-files" aria-label="Your files"></ul>
+    <p class="muted drop-foot">Files you send can't be seen, changed or deleted through this page. It runs on BlobFish, open-source file storage software; the BlobFish project itself never receives your files.</p>
   </main>
-  <div class="dock"><div id="toasts" role="status" aria-live="polite"></div></div>
+  <div id="announce" class="visually-hidden" role="status" aria-live="polite"></div>
 </body>
 </html>

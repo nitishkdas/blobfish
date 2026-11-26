@@ -102,7 +102,7 @@ export function renderSettings() {
     })], { danger: true }),
   ];
 
-  return h("section", { class: "main", "aria-label": "Bucket settings" },
+  return h("main", { id: "main", tabindex: "-1", class: "main", "aria-label": "Bucket settings" },
     renderBucketHeader(bucket, "settings"),
     h("div", { class: "settings" }, groups.filter(Boolean)));
 }

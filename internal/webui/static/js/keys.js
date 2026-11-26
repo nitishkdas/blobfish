@@ -27,7 +27,7 @@ export async function loadKeys() {
 }
 
 export function renderKeysPage() {
-  return h("section", { class: "main keys-page", "aria-label": "API keys" },
+  return h("main", { id: "main", tabindex: "-1", class: "main keys-page", "aria-label": "API keys" },
     h("header", { class: "page-head" },
       h("span", { class: "bucket-icon", "aria-hidden": "true" }, icon("key", 20)),
       h("div", { class: "page-head-text" },
@@ -133,7 +133,7 @@ async function revokeKey(k) {
     title: `Revoke “${k.name}”?`,
     body: [
       h("div", { class: "chips" }, k.scopes.map((sc) => h("span", { class: "chip" }, describeScope(sc)))),
-      "Apps using this key lose access immediately.",
+      "Apps using this key lose access immediately, and share and upload links made with it stop working. Files are not affected.",
       self && h("p", { class: "warn" }, "This is the key you're signed in with. You'll be signed out."),
     ],
     confirmLabel: "Revoke key",

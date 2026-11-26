@@ -33,11 +33,13 @@ export async function openUploadLinks(bucket, folder) {
         l.maxFileSize && `max ${formatSize(l.maxFileSize)} each`,
         expires ? (expired ? `expired ${relativeTime(expires)}` : `expires ${relativeTime(expires)}`) : "never expires",
       ].filter(Boolean).join(" · ");
-      return h("li", { class: expired || full ? "share-link expired" : "share-link" },
+      return h("li", { class: expired || full || !l.active ? "share-link expired" : "share-link" },
         h("div", { class: "share-link-row" },
           field,
           iconButton("copy", "Copy link", () => copyText(l.url, "Link copied", field)),
           mayRevoke && iconButton("trash", "Revoke link", () => revoke(l), "danger")),
+        !l.active && h("span", { class: "share-meta warn-text" },
+          `Not working: ${l.createdByName || "its creator"} was removed or can no longer write to this bucket. It works again if their access returns.`),
         h("span", { class: "share-meta" }, meta));
     }));
   };

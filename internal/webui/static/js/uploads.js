@@ -2,7 +2,7 @@
 // overwriting, and the docked queue panel.
 
 import { ApiError, objectExists, objectPath, session, showError } from "./api.js";
-import { ask, baseName, dirOf, formatSize, h, icon, iconButton, toast } from "./dom.js";
+import { announce, ask, baseName, dirOf, formatSize, h, icon, iconButton, rememberFocus, toast } from "./dom.js";
 import { can, state, ui } from "./state.js";
 
 let nextUploadId = 1;
@@ -173,6 +173,7 @@ async function pumpUploads() {
       try {
         await putFile(job);
         job.status = "done";
+        announce(`${baseName(job.key)} uploaded`);
         job.doneAt = Date.now();
         // Fade finished rows out shortly after, then drop them. Capture the
         // id now: `job` is reassigned to the next upload by the loop.
@@ -184,6 +185,7 @@ async function pumpUploads() {
         if (job.status === "cancelled") continue;
         job.status = "failed";
         job.error = err instanceof ApiError ? `${err.message} (${err.code})` : err.message;
+        announce(`${baseName(job.key)} failed: ${job.error}`);
       }
       renderUploadPanel();
     }
@@ -231,12 +233,10 @@ function putFile(job) {
     xhr.open("PUT", objectPath(job.bucket, job.key));
     xhr.setRequestHeader("Authorization", `Bearer ${session.key}`);
     xhr.setRequestHeader("Content-Type", job.file.type || "application/octet-stream");
-    let last = 0;
     xhr.upload.onprogress = (e) => {
       if (!e.lengthComputable) return;
       job.progress = e.loaded / e.total;
-      const now = performance.now();
-      if (now - last > 200 || job.progress >= 1) { last = now; renderUploadPanel(); }
+      showProgress(job);
     };
     xhr.onload = () => {
       job.xhr = null;
@@ -279,6 +279,9 @@ export function renderUploadPanel() {
 
   panel.hidden = false;
   panel.classList.toggle("collapsed", state.uploadsCollapsed);
+  // Rebuilt only when a job changes state (progress updates in place, see
+  // showProgress), and focus stays on the same button across rebuilds.
+  const focus = rememberFocus(panel);
   panel.replaceChildren(
     h("header", {},
       h("strong", {}, title),
@@ -288,6 +291,7 @@ export function renderUploadPanel() {
       }, "flip"),
       !active && iconButton("close", "Close", () => { state.uploads = []; state.finishedCount = 0; renderUploadPanel(); })),
     !state.uploadsCollapsed && h("ul", {}, jobs.map(renderUploadRow)));
+  focus.restore(panel);
   reserveDockSpace(panel.offsetHeight);
 }
 
@@ -297,7 +301,20 @@ function reserveDockSpace(px) {
   document.documentElement.style.setProperty("--dock-space", px ? `${px + 24}px` : "0px");
 }
 
+function pctText(job) {
+  return job.progress >= 1 ? "Saving…" : `${Math.floor(job.progress * 100)}%`;
+}
+
+// showProgress updates one row's bar and percentage in place: rebuilding
+// the panel on every tick would steal focus from its buttons.
+function showProgress(job) {
+  if (!job.ui?.bar?.isConnected) return; // collapsed, or not drawn yet
+  job.ui.bar.value = job.progress;
+  job.ui.pct.textContent = pctText(job);
+}
+
 function renderUploadRow(job) {
+  job.ui = {};
   const where = job.bucket + "/" + dirOf(job.key);
   let status;
   switch (job.status) {
@@ -306,7 +323,7 @@ function renderUploadRow(job) {
       break;
     case "uploading":
       status = [
-        h("span", { class: "muted pct" }, job.progress >= 1 ? "Saving…" : `${Math.floor(job.progress * 100)}%`),
+        job.ui.pct = h("span", { class: "muted pct" }, pctText(job)),
         iconButton("close", `Cancel ${baseName(job.key)}`, () => cancelUpload(job)),
       ];
       break;
@@ -326,9 +343,9 @@ function renderUploadRow(job) {
       h("span", { class: "job-name", title: job.key }, baseName(job.key)),
       h("span", { class: "job-sub" }, job.status === "failed" ? job.error : `${formatSize(job.file.size)} · ${where}`)),
     h("div", { class: "job-status" }, status),
-    job.status === "uploading" && h("progress", { max: 1, value: job.progress }));
+    job.status === "uploading" && (job.ui.bar = h("progress", { max: 1, value: job.progress, "aria-label": `Uploading ${baseName(job.key)}` })));
   if (job.status === "done") {
-    // Rows are rebuilt on every progress tick; keep the fade-out anchored to
+    // Rows are rebuilt when other jobs change; keep the fade-out anchored to
     // when this job finished rather than restarting it. (CSSOM writes are
     // allowed under the CSP; style attributes in markup are not.)
     li.style.animationDelay = `${1900 - (Date.now() - job.doneAt)}ms`;

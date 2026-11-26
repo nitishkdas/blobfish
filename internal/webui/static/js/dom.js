@@ -76,10 +76,32 @@ export function iconButton(name, label, onclick, extraClass = "") {
   return h("button", { class: `icon-btn ${extraClass}`.trim(), type: "button", "aria-label": label, title: label, onclick }, icon(name));
 }
 
+// toast shows a short message. Errors go to the assertive #alerts region
+// and stay until dismissed (no time limit to read them, WCAG 2.2.1); at
+// most three are kept. Other messages are polite and fade after 5 s.
 export function toast(message, { error = false, detail = "" } = {}) {
-  const el = h("div", { class: error ? "toast error" : "toast" }, message, detail && h("small", {}, detail));
-  document.getElementById("toasts").append(el);
-  setTimeout(() => el.remove(), error ? 8000 : 3500);
+  const text = h("div", { class: "toast-text" }, message, detail && h("small", {}, detail));
+  if (!error) {
+    const el = h("div", { class: "toast" }, text);
+    document.getElementById("toasts").append(el);
+    setTimeout(() => el.remove(), 5000);
+    return;
+  }
+  const alerts = document.getElementById("alerts");
+  const el = h("div", { class: "toast error" }, text,
+    iconButton("close", "Dismiss", () => el.remove(), "small"));
+  alerts.append(el);
+  while (alerts.children.length > 3) alerts.firstElementChild.remove();
+}
+
+// announce tells screen-reader users about a change they can't see happen
+// (a new page, an upload finishing) without showing anything.
+export function announce(message) {
+  const el = document.getElementById("announce");
+  if (!el) return;
+  // Clear first so the same text twice is still announced.
+  el.textContent = "";
+  setTimeout(() => { el.textContent = message; }, 50);
 }
 
 const sizeFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
@@ -141,7 +163,12 @@ export function ask({ title, body = [], choices, input = null, focus = "" }) {
   const inputEl = document.getElementById("ask-input");
   const error = document.getElementById("ask-error");
   error.textContent = "";
-  inputEl.oninput = () => { error.textContent = ""; }; // a stale error would contradict the new value
+  inputEl.removeAttribute("aria-invalid");
+  inputEl.setAttribute("aria-describedby", error.id);
+  inputEl.oninput = () => { // a stale error would contradict the new value
+    error.textContent = "";
+    inputEl.removeAttribute("aria-invalid");
+  };
   field.hidden = !input;
   if (input) {
     document.getElementById("ask-label").textContent = input.label;
@@ -162,6 +189,7 @@ export function ask({ title, body = [], choices, input = null, focus = "" }) {
       if (problem) {
         ev.preventDefault();
         error.textContent = problem;
+        inputEl.setAttribute("aria-invalid", "true");
         inputEl.focus();
       }
     }
@@ -227,6 +255,7 @@ export function formDialog({ title, text = "", body, submitLabel, onSubmit, focu
   document.getElementById("form-dialog-body").replaceChildren(...[body].flat().filter(Boolean));
   submit.textContent = submitLabel;
   error.textContent = "";
+  form.setAttribute("aria-describedby", error.id);
   form.oninput = () => { error.textContent = ""; };
   let done = false;
   form.onsubmit = async (ev) => {
@@ -277,4 +306,25 @@ export function field(label, control, help = "") {
   const helpEl = help && h("span", { class: "field-help", id: `${id}-help` }, help);
   if (helpEl) input.setAttribute("aria-describedby", helpEl.id);
   return h("div", { class: "field" }, h("label", { for: id }, label), control, helpEl);
+}
+
+// rememberFocus notes which control inside el has focus, by what it is
+// (id, or tag + label + text + href), so that after el's content is
+// rebuilt, restore(newEl) can focus the matching new control, or newEl
+// itself, instead of letting focus fall to <body>. Does nothing when
+// focus was elsewhere.
+export function rememberFocus(el) {
+  const a = document.activeElement;
+  if (!a || !el.contains(a)) return { restore() {} };
+  const k = { tag: a.tagName, id: a.id, label: a.getAttribute("aria-label"), text: a.textContent, href: a.getAttribute("href") };
+  return {
+    restore(root) {
+      let target = null;
+      if (k.id) target = root.id === k.id ? root : root.querySelector(`#${CSS.escape(k.id)}`);
+      target ||= [...root.querySelectorAll(k.tag)].find((c) =>
+        c.getAttribute("aria-label") === k.label && c.textContent === k.text && c.getAttribute("href") === k.href);
+      if (!target && root.tabIndex < 0 && !root.hasAttribute("tabindex")) root.setAttribute("tabindex", "-1");
+      (target || root).focus({ preventScroll: true });
+    },
+  };
 }

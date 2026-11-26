@@ -86,7 +86,7 @@ function go(changes) {
 export function renderFiles() {
   const r = state.route;
   const L = state.listing;
-  const main = h("section", { class: "main", "aria-label": "Files" });
+  const main = h("main", { id: "main", tabindex: "-1", class: "main", "aria-label": "Files" });
   const canWrite = can("w", r.bucket);
   if (canWrite) wireDrop(main);
 
@@ -275,11 +275,13 @@ async function share(o) {
       const expires = l.expires ? new Date(l.expires) : null;
       const expired = expires && expires < new Date();
       const mayRevoke = l.createdBy === state.me.keyId || can("w", bucket);
-      return h("li", { class: expired ? "share-link expired" : "share-link" },
+      return h("li", { class: expired || !l.active ? "share-link expired" : "share-link" },
         h("div", { class: "share-link-row" },
           field,
           iconButton("copy", "Copy link", () => copyText(l.url, "Link copied", field)),
           mayRevoke && iconButton("trash", "Revoke link", () => revoke(l), "danger")),
+        !l.active && h("span", { class: "share-meta warn-text" },
+          `Not working: ${l.createdByName || "its creator"} was removed or can no longer read this file. It works again if their access returns.`),
         h("span", { class: "share-meta" },
           l.filename !== baseName(o.key) && `Saved as “${l.filename}” · `,
           expires ? (expired ? `Expired ${relativeTime(expires)}` : `Expires ${relativeTime(expires)}`) : "Never expires",

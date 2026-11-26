@@ -43,7 +43,7 @@ export function renderTrash() {
   const bucket = state.route.bucket;
   const days = state.me.trashDays;
 
-  return h("section", { class: "main", "aria-label": "Trash" },
+  return h("main", { id: "main", tabindex: "-1", class: "main", "aria-label": "Trash" },
     renderBucketHeader(bucket, "trash"),
     h("div", { class: "toolbar" },
       h("div", { class: "callout" }, icon("info", 16), h("p", {}, days > 0

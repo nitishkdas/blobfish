@@ -18,7 +18,7 @@ export async function loadUsers() {
 }
 
 export function renderUsersPage() {
-  return h("section", { class: "main users-page", "aria-label": "Users" },
+  return h("main", { id: "main", tabindex: "-1", class: "main users-page", "aria-label": "Users" },
     h("header", { class: "page-head" },
       h("span", { class: "bucket-icon", "aria-hidden": "true" }, icon("users", 20)),
       h("div", { class: "page-head-text" },
@@ -130,7 +130,7 @@ async function deleteUser(u) {
   const ok = await confirmDialog({
     title: `Delete user “${u.name}”?`,
     body: [
-      "They are signed out at once and can't sign in again. Files, links and keys are not affected.",
+      "They are signed out at once and can't sign in again. Share and upload links they made stop working; files and API keys are not affected.",
       self && h("p", { class: "warn" }, "This is you. You'll be signed out."),
     ],
     confirmLabel: "Delete user",

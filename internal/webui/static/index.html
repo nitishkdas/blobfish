@@ -10,12 +10,18 @@
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div id="app" class="boot">Loading…</div>
   <div class="dock">
-    <section id="uploads" class="upload-panel" aria-label="Uploads" aria-live="polite" hidden></section>
+    <section id="uploads" class="upload-panel" aria-label="Uploads" hidden></section>
+    <!-- Errors stay until dismissed and are announced at once; other
+         messages fade. #announce speaks page changes and upload progress
+         milestones without showing anything. -->
+    <div id="alerts" role="alert"></div>
     <div id="toasts" role="status" aria-live="polite"></div>
   </div>
-  <dialog id="share">
+  <div id="announce" class="visually-hidden" role="status" aria-live="polite"></div>
+  <dialog id="share" aria-labelledby="share-title">
     <form method="dialog" class="dialog share-dialog">
       <h2 id="share-title" class="break">Share</h2>
       <section id="share-public" class="share-public" hidden>
@@ -50,7 +56,7 @@
       </div>
     </form>
   </dialog>
-  <dialog id="uplinks">
+  <dialog id="uplinks" aria-labelledby="uplinks-title">
     <form method="dialog" class="dialog share-dialog">
       <h2 id="uplinks-title" class="break">Upload links</h2>
       <p class="muted">Anyone with an upload link can add files to its folder from a simple web page, without a key. They can't see, replace or delete anything.</p>
@@ -87,7 +93,7 @@
       </div>
     </form>
   </dialog>
-  <dialog id="webhooks">
+  <dialog id="webhooks" aria-labelledby="webhooks-title">
     <form method="dialog" class="dialog share-dialog">
       <h2 id="webhooks-title" class="break">Webhooks</h2>
       <p class="muted">BlobFish sends a signed POST to each address when files in this bucket are added, deleted or restored. Events wait and are retried if your app is down.</p>
@@ -118,7 +124,7 @@
     </form>
   </dialog>
   <!-- One dialog for confirm / choice / prompt; filled by ask() in js/dom.js. -->
-  <dialog id="ask">
+  <dialog id="ask" aria-labelledby="ask-title">
     <form method="dialog" class="dialog">
       <h2 id="ask-title"></h2>
       <div id="ask-body" class="confirm-body"></div>
@@ -130,14 +136,14 @@
       <div id="ask-actions" class="row end wrap"></div>
     </form>
   </dialog>
-  <dialog id="details">
+  <dialog id="details" aria-labelledby="details-title">
     <form method="dialog" class="dialog">
       <h2 id="details-title" class="break"></h2>
       <div id="details-body"></div>
       <div id="details-actions" class="row end wrap"></div>
     </form>
   </dialog>
-  <dialog id="cors">
+  <dialog id="cors" aria-labelledby="cors-title">
     <form method="dialog" class="dialog">
       <h2 id="cors-title" class="break">Browser access</h2>
       <p class="muted">Web pages on these sites may upload to and download from this bucket directly, for example to a presigned upload URL your app creates. Apps, servers and scripts don't need this.</p>
@@ -156,7 +162,7 @@
   </dialog>
   <!-- Generic form dialog, filled by formDialog() in js/dom.js. Not
        method="dialog": it stays open until the save succeeds. -->
-  <dialog id="form-dialog">
+  <dialog id="form-dialog" aria-labelledby="form-dialog-title">
     <form id="form-dialog-form" class="dialog form-dialog">
       <h2 id="form-dialog-title"></h2>
       <p id="form-dialog-text" class="muted"></p>
@@ -168,9 +174,9 @@
       </div>
     </form>
   </dialog>
-  <dialog id="new-key">
+  <dialog id="new-key" aria-labelledby="new-key-title">
     <form method="dialog" class="dialog">
-      <h2>Key created: <span id="new-key-name"></span></h2>
+      <h2 id="new-key-title">Key created: <span id="new-key-name"></span></h2>
       <p class="warn">Copy this key now. BlobFish keeps only a hash of it, so it can never be shown again.</p>
       <input id="new-key-value" class="mono" readonly aria-label="New API key">
       <div id="new-key-scopes" class="chips"></div>

@@ -11,8 +11,10 @@
   --line: light-dark(#e4e4e7, #27272a);
   --line-strong: light-dark(#d4d4d8, #3f3f46);
   --text: light-dark(#18181b, #f4f4f5);
-  --muted: light-dark(#71717a, #a1a1aa);
-  --faint: light-dark(#a1a1aa, #71717a);
+  /* Text colours meet WCAG AA (4.5:1) on every surface above, both themes:
+     --muted ≥ 5.1:1, --faint ≥ 4.6:1 (light) / 4.7:1 (dark). */
+  --muted: light-dark(#63636b, #a1a1aa);
+  --faint: light-dark(#71717a, #8a8a93);
   --ink: light-dark(#18181b, #f4f4f5);         /* primary buttons */
   --ink-text: light-dark(#ffffff, #18181b);
   --accent: light-dark(#2563eb, #60a5fa);
@@ -58,6 +60,15 @@ button, input, select { font: inherit; color: inherit; }
 code { font-family: var(--mono); font-size: 12px; background: var(--subtle); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .muted { color: var(--muted); }
 .break { word-break: break-all; }
+/* Hidden until a keyboard user tabs to it. */
+.skip-link {
+  position: fixed; top: 8px; left: 8px; z-index: 20;
+  padding: 8px 14px; border-radius: var(--radius-sm);
+  background: var(--ink); color: var(--ink-text); font-weight: 500; text-decoration: none;
+  transform: translateY(-200%);
+}
+.skip-link:focus { transform: none; }
+#main:focus { outline: none; } /* focused by script after navigation, not by the user */
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip-path: inset(50%); white-space: nowrap;
@@ -329,8 +340,7 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--m
 td.when { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
 th.actions, td.actions { text-align: right; white-space: nowrap; width: 1%; }
 td.actions { padding-right: 10px; }
-td.actions .icon-btn { opacity: .55; transition: opacity .12s var(--ease), background-color .12s; }
-tbody tr:hover td.actions .icon-btn, td.actions .icon-btn:focus-visible { opacity: 1; }
+td.actions .icon-btn { transition: background-color .12s; } /* full --muted: controls need 3:1 */
 td.name { overflow-wrap: anywhere; min-width: 12rem; }
 td.name > button, td.name .with-icon {
   height: auto; border: 0; background: none; box-shadow: none; padding: 6px 0;
@@ -512,15 +522,17 @@ dl.details dd { margin: 0; min-width: 0; display: flex; align-items: center; gap
   display: grid; gap: 8px; justify-items: end;
   width: min(380px, calc(100vw - 40px));
 }
-#toasts { display: grid; gap: 8px; justify-items: end; }
+#toasts, #alerts { display: grid; gap: 8px; justify-items: end; }
 .toast {
   background: var(--ink); color: var(--ink-text);
   padding: 10px 14px; border-radius: var(--radius-sm); max-width: 420px;
   box-shadow: var(--shadow-lg); font-size: 13.5px;
   animation: toast-in .2s var(--ease);
 }
-.toast.error { background: var(--danger); color: var(--on-danger); }
-.toast small { display: block; opacity: .7; font-family: var(--mono); font-size: 11.5px; margin-top: 2px; }
+.toast.error { display: flex; align-items: flex-start; gap: 8px; padding-right: 6px; background: var(--danger); color: var(--on-danger); }
+.toast.error .icon-btn { flex: none; color: inherit; margin: -4px 0; }
+.toast.error .icon-btn:hover { background: color-mix(in srgb, var(--on-danger) 15%, transparent); }
+.toast small { display: block; font-family: var(--mono); font-size: 11.5px; margin-top: 2px; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } }
 
 .upload-panel {
@@ -591,3 +603,6 @@ body:has(.drop-page) { min-width: 0; }
 /* Sign-in: switch between user name and API key */
 button.login-switch { margin-top: 14px; font-size: 13px; padding: 0; }
 button.login-switch:hover { text-decoration: underline; }
+.drop-operator { margin: 0 0 4px; font-size: 13.5px; }
+.drop-operator a { color: var(--accent-text); }
+.warn-text { color: var(--danger); }

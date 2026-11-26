@@ -2,7 +2,7 @@
 // only to the /v1 API, with a session token (user sign-in) or an API key.
 
 import { api, forgetKey, loadKey, saveKey, session, showError } from "./api.js";
-import { ask, emptyState, formatSize, h, icon, iconButton, toast, wireDialogBackdrops } from "./dom.js";
+import { ask, emptyState, formatSize, h, icon, iconButton, rememberFocus, toast, wireDialogBackdrops } from "./dom.js";
 import { reload, renderFiles, showRoute } from "./files.js";
 import { describeScope, loadKeys, renderKeysPage } from "./keys.js";
 import { changeOwnPassword, loadUsers, renderUsersPage } from "./users.js";
@@ -157,6 +157,21 @@ function route() {
   if (r.view === "trash") showTrash(r);
   if (r.view === "settings") showSettings(r);
   renderApp();
+  // A new page: say where we are (tab title, screen readers) and start
+  // keyboard focus at its content rather than back at the top of the page.
+  document.title = pageTitle(r);
+  document.getElementById("main")?.focus({ preventScroll: true });
+}
+
+function pageTitle(r) {
+  const where = {
+    files: () => `${r.bucket}${r.prefix ? "/" + r.prefix.slice(0, -1) : ""}`,
+    trash: () => `Trash · ${r.bucket}`,
+    settings: () => `Settings · ${r.bucket}`,
+    keys: () => "API keys",
+    users: () => "Users",
+  }[r.view];
+  return where ? `${where()} · BlobFish` : "BlobFish";
 }
 
 window.addEventListener("hashchange", route);
@@ -256,7 +271,7 @@ function renderMain() {
   if (r.view === "files" && can("r", r.bucket)) return renderFiles();
   if (r.view === "trash" && can("w", r.bucket)) return renderTrash();
   if (r.view === "settings" && can("w", r.bucket)) return renderSettings();
-  return h("section", { class: "main", "aria-label": "Files" },
+  return h("main", { id: "main", tabindex: "-1", class: "main", "aria-label": "Files" },
     emptyState({
       icon: "database",
       title: isServerAdmin() ? "No buckets yet" : "Nothing to show",
@@ -268,7 +283,12 @@ function renderMain() {
 ui.renderApp = renderApp;
 ui.renderMain = () => {
   const old = document.querySelector(".main");
-  if (old) old.replaceWith(renderMain());
+  if (old) {
+    const focus = rememberFocus(old);
+    const fresh = renderMain();
+    old.replaceWith(fresh);
+    focus.restore(fresh);
+  }
   // Keep the sidebar's sizes and current bucket in step.
   const side = document.querySelector(".side");
   if (side) {
@@ -278,6 +298,7 @@ ui.renderMain = () => {
   }
 };
 ui.reloadFiles = reload;
+
 
 // ---------- Start ----------
 
