@@ -47,6 +47,7 @@ const (
 	CodeInvalidOrigin     = "InvalidOrigin"
 	CodeNoSuchTrashItem   = "NoSuchTrashItem"
 	CodeKeyExists         = "KeyExists"
+	CodeQuotaExceeded     = "QuotaExceeded"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This
@@ -73,6 +74,10 @@ var errorMapping = []struct {
 	{store.ErrInvalidOrigin, http.StatusBadRequest, CodeInvalidOrigin},
 	{store.ErrNoSuchTrashItem, http.StatusNotFound, CodeNoSuchTrashItem},
 	{store.ErrKeyExists, http.StatusConflict, CodeKeyExists},
+	// 507 like a full disk, but a distinct code: the bucket is full, not
+	// the server. Deleting from the bucket makes room at once.
+	{store.ErrQuotaExceeded, http.StatusInsufficientStorage, CodeQuotaExceeded},
+	{store.ErrInvalidQuota, http.StatusBadRequest, CodeInvalidRequest},
 	{errLinkExpired, http.StatusGone, CodeLinkExpired},
 	{auth.ErrUnauthenticated, http.StatusUnauthorized, CodeUnauthorized},
 	{auth.ErrSignatureInvalid, http.StatusForbidden, CodeSignatureInvalid},

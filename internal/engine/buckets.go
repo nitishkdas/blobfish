@@ -129,6 +129,14 @@ func (e *Engine) SetBucketCORS(ctx context.Context, name string, origins []strin
 	return e.updateBucket(name, func(r *bucketRecord) { r.CORSOrigins = clean })
 }
 
+// SetBucketQuota implements store.Buckets.
+func (e *Engine) SetBucketQuota(ctx context.Context, name string, quotaBytes int64) (store.BucketInfo, error) {
+	if quotaBytes < 0 {
+		return store.BucketInfo{}, fmt.Errorf("%w: %d; use 0 for no quota", store.ErrInvalidQuota, quotaBytes)
+	}
+	return e.updateBucket(name, func(r *bucketRecord) { r.QuotaBytes = quotaBytes })
+}
+
 // updateBucket changes one bucket's settings in a single transaction.
 func (e *Engine) updateBucket(name string, change func(*bucketRecord)) (store.BucketInfo, error) {
 	if err := store.ValidateBucketName(name); err != nil {

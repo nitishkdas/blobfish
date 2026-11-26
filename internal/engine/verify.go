@@ -140,6 +140,8 @@ func Verify(ctx context.Context, dir string, opts VerifyOptions) (VerifyStats, e
 	e := &Engine{objDir: filepath.Join(dir, "objects")} // only for blobPath
 	for _, bucket := range buckets {
 		st.Buckets++
+		var liveBytes, liveObjects int64 // to check the bucket's usage counters
+		countable := true                // false once a record can't be read
 		// Live objects, then the bucket's trash: trashed objects can still
 		// be restored, so their bytes matter too.
 		for _, inTrash := range []bool{false, true} {
@@ -162,8 +164,13 @@ func Verify(ctx context.Context, dir string, opts VerifyOptions) (VerifyStats, e
 					case it.decodeErr != nil:
 						p.Kind, p.Detail = ProblemMetadata, "unreadable object record: "+it.decodeErr.Error()
 						report(p)
+						countable = countable && inTrash
 						continue
-					case !it.indexed:
+					case !inTrash:
+						liveBytes += it.rec.Size
+						liveObjects++
+					}
+					if !it.indexed {
 						p.Kind, p.Detail = ProblemUnindexed, "blob is missing from the blob index; starting the server would delete it"
 						report(p)
 						// Still check the bytes: they may be fine and worth saving.
@@ -182,6 +189,9 @@ func Verify(ctx context.Context, dir string, opts VerifyOptions) (VerifyStats, e
 				after = []byte(batch[len(batch)-1].cursor)
 			}
 		}
+		if p, ok := checkUsage(db, bucket, liveBytes, liveObjects); countable && !ok {
+			report(p)
+		}
 	}
 
 	if opts.Bucket == "" {
@@ -191,6 +201,24 @@ func Verify(ctx context.Context, dir string, opts VerifyOptions) (VerifyStats, e
 		}
 	}
 	return st, nil
+}
+
+// checkUsage compares a bucket's usage counters (which quotas rely on)
+// with what its object records add up to.
+func checkUsage(db *bbolt.DB, bucket string, bytes, objects int64) (VerifyProblem, bool) {
+	var r bucketRecord
+	err := db.View(func(tx *bbolt.Tx) error {
+		return json.Unmarshal(tx.Bucket(bktBuckets).Get([]byte(bucket)), &r)
+	})
+	switch {
+	case err != nil:
+		return VerifyProblem{Kind: ProblemMetadata, Detail: fmt.Sprintf("bucket %s: unreadable record: %v", bucket, err)}, false
+	case r.UsedBytes != bytes || r.Objects != objects:
+		return VerifyProblem{Kind: ProblemMetadata, Detail: fmt.Sprintf(
+			"bucket %s: usage counters say %d bytes in %d objects, but its objects add up to %d bytes in %d",
+			bucket, r.UsedBytes, r.Objects, bytes, objects)}, false
+	}
+	return VerifyProblem{}, true
 }
 
 // checkVerifiableFormat refuses data this binary cannot read as-is: newer

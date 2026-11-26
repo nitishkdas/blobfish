@@ -197,26 +197,42 @@ func linkFilename(l store.LinkRecord) string {
 	return defaultFilename(l.Key)
 }
 
-// updateBucket changes bucket settings; today only public visibility.
+// updateBucket changes bucket settings: visibility and browser access
+// (bucket admin), and the quota (server admin only: a bucket admin who
+// could raise their own quota would make it meaningless).
 func (a *api) updateBucket(w http.ResponseWriter, r *http.Request) {
 	bucket := r.PathValue("bucket")
-	if _, ok := a.authorize(w, r, auth.Target{Bucket: bucket}, auth.PermAdmin); !ok {
+	p, ok := a.authorize(w, r, auth.Target{Bucket: bucket}, auth.PermAdmin)
+	if !ok {
 		return
 	}
 	var req struct {
 		Public      *bool     `json:"public"`
 		CORSOrigins *[]string `json:"corsOrigins"`
+		QuotaBytes  *int64    `json:"quotaBytes"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	if req.Public == nil && req.CORSOrigins == nil {
-		a.fail(w, r, badRequest(`nothing to change: send {"public": true|false} and/or {"corsOrigins": [...]}`))
+	if req.Public == nil && req.CORSOrigins == nil && req.QuotaBytes == nil {
+		a.fail(w, r, badRequest(`nothing to change: send {"public": true|false}, {"corsOrigins": [...]} and/or {"quotaBytes": n}`))
+		return
+	}
+	if req.QuotaBytes != nil && !p.Can(auth.PermAdmin, serverWide.Bucket, "") {
+		a.fail(w, r, errAccessDenied)
 		return
 	}
 	var info store.BucketInfo
 	var err error
+	if req.QuotaBytes != nil {
+		if info, err = a.buckets.SetBucketQuota(r.Context(), bucket, *req.QuotaBytes); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		a.log.InfoContext(r.Context(), "bucket quota changed",
+			"request_id", RequestID(r.Context()), "bucket", bucket, "quota_bytes", info.QuotaBytes)
+	}
 	if req.CORSOrigins != nil {
 		if info, err = a.buckets.SetBucketCORS(r.Context(), bucket, *req.CORSOrigins); err != nil {
 			a.fail(w, r, err)

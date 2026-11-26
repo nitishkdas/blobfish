@@ -213,6 +213,9 @@ func (e *Engine) RestoreTrash(ctx context.Context, bucket, id string) (store.Obj
 		if objs.Get([]byte(r.Key)) != nil {
 			return fmt.Errorf("%w: %s/%s; delete or rename it first", store.ErrKeyExists, bucket, r.Key)
 		}
+		if err := adjustUsage(tx, bucket, r.Object.Size, 1, true); err != nil {
+			return err
+		}
 		val, err := json.Marshal(r.Object)
 		if err != nil {
 			return err

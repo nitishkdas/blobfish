@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -259,4 +260,15 @@ func TestVerifyRefuses(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
+}
+
+func TestVerifyUsageCounters(t *testing.T) {
+	dir, _ := verifyFixture(t)
+	editDB(t, dir, func(tx *bbolt.Tx) error {
+		return tx.Bucket(bktBuckets).Put([]byte(testBucket), []byte(`{"created":"2026-01-01T00:00:00Z","used":1,"objects":7}`))
+	})
+	_, probs := runVerify(t, dir, VerifyOptions{})
+	if len(probs) != 1 || probs[0].Kind != ProblemMetadata || !strings.Contains(probs[0].Detail, "add up to 23 bytes in 2") {
+		t.Errorf("problems = %v", probs)
+	}
 }

@@ -97,10 +97,19 @@ type bucketRecord struct {
 	Created     time.Time `json:"created"`
 	Public      bool      `json:"public,omitempty"`
 	CORSOrigins []string  `json:"cors,omitempty"`
+	QuotaBytes  int64     `json:"quota,omitempty"` // 0 = none
+	// UsedBytes and Objects count live objects. Every transaction that
+	// adds or removes an object updates them (see usage.go), so they are
+	// exact without scanning.
+	UsedBytes int64 `json:"used"`
+	Objects   int64 `json:"objects"`
 }
 
 func (r bucketRecord) info(name string) store.BucketInfo {
-	return store.BucketInfo{Name: name, Created: r.Created, Public: r.Public, CORSOrigins: r.CORSOrigins}
+	return store.BucketInfo{
+		Name: name, Created: r.Created, Public: r.Public, CORSOrigins: r.CORSOrigins,
+		QuotaBytes: r.QuotaBytes, UsedBytes: r.UsedBytes, Objects: r.Objects,
+	}
 }
 
 type objectRecord struct {

@@ -6,7 +6,7 @@ import {
   relativeTime, toast,
 } from "./dom.js";
 import { navigate } from "./router.js";
-import { PAGE_SIZES, bucketInfo, can, rerenderMain, state, ui } from "./state.js";
+import { PAGE_SIZES, bucketInfo, can, isServerAdmin, rerenderMain, state, ui } from "./state.js";
 import { pickAndUpload, wireDrop } from "./uploads.js";
 
 // ---------- Loading ----------
@@ -54,6 +54,9 @@ export async function showRoute(route) {
       return;
     }
     Object.assign(L, { page, folders: res.prefixes, files: res.objects, nextCursor: res.nextCursor || "", loaded: true });
+    // Fresh usage numbers for the toolbar (uploads, deletes and restores
+    // change them). Not worth an error toast if this one fails.
+    try { state.buckets = (await api("GET", "/v1/buckets")).buckets; } catch { /* keep the old numbers */ }
     if (res.nextCursor) L.cursors[page] = res.nextCursor;
     L.cursors.length = page + (res.nextCursor ? 1 : 0);
   } catch (err) {
@@ -92,6 +95,7 @@ export function renderFiles() {
       isPublic && h("span", { class: "chip public-chip", title: "Files in this bucket can be read without a key" },
         icon("globe", 14), "Public"),
       corsChip(r.bucket),
+      usageChip(r.bucket),
       h("div", { class: "toolbar-actions" },
         canWrite && !r.prefix && h("button", {
           class: "link with-icon", title: "Deleted files you can still restore",
@@ -107,6 +111,10 @@ export function renderFiles() {
           class: "link", onclick: () => editBrowserAccess(r.bucket),
           title: "Websites whose pages may upload to and download from this bucket directly",
         }, "Browser access"),
+        isServerAdmin() && !r.prefix && h("button", {
+          class: "link", onclick: () => editQuota(r.bucket),
+          title: "Limit how much this bucket may store",
+        }, "Quota"),
         can("admin", r.bucket) && !r.prefix && h("button", {
           class: "link danger", onclick: deleteBucket, title: "Only empty buckets can be deleted",
         }, "Delete bucket"))),
@@ -318,6 +326,49 @@ async function share(o) {
   list.replaceChildren(h("li", { class: "muted share-none" }, "Loading…"));
   dialog.showModal();
   await load();
+}
+
+// usageChip shows what the bucket's files take, against its quota if it
+// has one. Trash is not counted, matching the server.
+function usageChip(bucket) {
+  const b = bucketInfo(bucket);
+  if (!b) return null;
+  const files = `${formatInt(b.objects)} file${b.objects === 1 ? "" : "s"}`;
+  if (!b.quotaBytes) {
+    return h("span", { class: "chip usage-chip", title: "Space used by this bucket's files (trash not counted)" },
+      `${formatSize(b.usedBytes)} · ${files}`);
+  }
+  const pct = Math.min(100, Math.round((b.usedBytes / b.quotaBytes) * 100));
+  return h("span", {
+    class: pct >= 90 ? "chip usage-chip near-full" : "chip usage-chip",
+    title: `${files}, ${pct}% of the quota (trash not counted). Uploads that don't fit are refused.`,
+  }, `${formatSize(b.usedBytes)} of ${formatSize(b.quotaBytes)}`);
+}
+
+// editQuota lets a server admin cap the bucket's size, in GB.
+async function editQuota(bucket) {
+  const GB = 1024 ** 3;
+  const current = bucketInfo(bucket)?.quotaBytes || 0;
+  const res = await ask({
+    title: `Quota for “${bucket}”`,
+    body: [h("p", { class: "muted" },
+      "Uploads that would take the bucket past this size are refused. Files in trash don't count. Leave empty for no limit.")],
+    input: {
+      label: "Maximum size in GB",
+      value: current ? String(+(current / GB).toFixed(3)) : "",
+      placeholder: "no limit",
+      validate: (v) => (v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0) ? "" : "Enter a number of GB, or leave empty."),
+    },
+    choices: [{ label: "Cancel", value: "" }, { label: "Save", value: "ok", kind: "primary" }],
+  });
+  if (!res) return;
+  const quotaBytes = res.value === "" ? 0 : Math.round(Number(res.value) * GB);
+  try {
+    await api("PATCH", `/v1/buckets/${encodeURIComponent(bucket)}`, { body: { quotaBytes } });
+    state.buckets = (await api("GET", "/v1/buckets")).buckets;
+    toast(quotaBytes ? `Quota set to ${formatSize(quotaBytes)}` : "Quota removed");
+    rerenderMain();
+  } catch (err) { showError(err); }
 }
 
 function corsChip(bucket) {

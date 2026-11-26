@@ -83,6 +83,10 @@ func (a *api) putObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
 	}
 	info, err := a.store.Put(r.Context(), t.Bucket, t.Key, r.Body, meta)
 	if err != nil {
+		// The body may be partly unread (refused for quota or space before
+		// or while streaming). Don't let net/http drain gigabytes of it to
+		// keep the connection alive.
+		w.Header().Set("Connection", "close")
 		a.fail(w, r, err)
 		return
 	}

@@ -43,6 +43,9 @@ type Buckets interface {
 	// SetBucketCORS replaces the web origins whose pages may call this
 	// bucket's objects from a browser. Empty = none.
 	SetBucketCORS(ctx context.Context, name string, origins []string) (BucketInfo, error)
+	// SetBucketQuota caps the bucket's live bytes; 0 removes the cap. A
+	// quota below current use is allowed: it only blocks growth.
+	SetBucketQuota(ctx context.Context, name string, quotaBytes int64) (BucketInfo, error)
 }
 
 // Links stores share links: permanent or long-lived URLs to one object
@@ -195,6 +198,12 @@ type BucketInfo struct {
 	// CORSOrigins are web origins ("https://app.example.com" or "*")
 	// whose pages may call this bucket's objects from a browser.
 	CORSOrigins []string
+	// QuotaBytes caps the bytes of the bucket's live objects; 0 = no
+	// limit. Trash does not count.
+	QuotaBytes int64
+	// UsedBytes and Objects count the live objects (not trash).
+	UsedBytes int64
+	Objects   int64
 }
 
 // ListOptions controls a List call.
@@ -251,4 +260,7 @@ var (
 	// ErrInsufficientStorage: accepting the upload would cut into the free
 	// space reserve kept so deletes and metadata updates always fit.
 	ErrInsufficientStorage = errors.New("not enough free disk space")
+	// ErrQuotaExceeded: the write would take the bucket over its quota.
+	ErrQuotaExceeded = errors.New("bucket quota exceeded")
+	ErrInvalidQuota  = errors.New("invalid quota")
 )

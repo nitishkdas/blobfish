@@ -36,6 +36,9 @@ type bucketJSON struct {
 	Created     time.Time `json:"created"`
 	Public      bool      `json:"public"`
 	CORSOrigins []string  `json:"corsOrigins"` // sites whose pages may call this bucket
+	QuotaBytes  int64     `json:"quotaBytes"`  // 0 = no quota
+	UsedBytes   int64     `json:"usedBytes"`   // live objects; trash not counted
+	Objects     int64     `json:"objects"`
 }
 
 func toBucketJSON(b store.BucketInfo) bucketJSON {
@@ -43,7 +46,10 @@ func toBucketJSON(b store.BucketInfo) bucketJSON {
 	if origins == nil {
 		origins = []string{}
 	}
-	return bucketJSON{Name: b.Name, Created: b.Created, Public: b.Public, CORSOrigins: origins}
+	return bucketJSON{
+		Name: b.Name, Created: b.Created, Public: b.Public, CORSOrigins: origins,
+		QuotaBytes: b.QuotaBytes, UsedBytes: b.UsedBytes, Objects: b.Objects,
+	}
 }
 
 func (a *api) createBucket(w http.ResponseWriter, r *http.Request) {

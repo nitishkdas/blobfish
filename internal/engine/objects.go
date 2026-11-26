@@ -40,11 +40,28 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 	if err := e.checkSpace(meta.SizeHint); err != nil {
 		return store.ObjectInfo{}, err
 	}
-	// Fail fast before streaming gigabytes into a bucket that isn't there.
-	// The commit re-checks, in case the bucket is deleted meanwhile.
+	// Fail fast before streaming gigabytes into a bucket that isn't there,
+	// or that has no quota room left. The commit re-checks both, in case
+	// they change meanwhile.
+	guard := &quotaGuard{bucket: bucket}
 	if err := e.db.View(func(tx *bbolt.Tx) error {
-		_, err := objectsOf(tx, bucket)
-		return err
+		objs, err := objectsOf(tx, bucket)
+		if err != nil {
+			return err
+		}
+		if prev := objs.Get([]byte(key)); prev != nil {
+			if old, err := decodeObject(prev); err == nil {
+				guard.oldSize = old.Size
+			}
+		}
+		guard.room, guard.rec, err = quotaRoom(tx, bucket, guard.oldSize)
+		if err != nil {
+			return err
+		}
+		if guard.room >= 0 && meta.SizeHint > guard.room {
+			return quotaError(bucket, guard.rec, meta.SizeHint-guard.oldSize)
+		}
+		return nil
 	}); err != nil {
 		return store.ObjectInfo{}, err
 	}
@@ -64,7 +81,8 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 	h := sha256.New()
 	// spaceGuard re-checks free space as the body streams, for uploads of
 	// unknown size and for space taken by other uploads meanwhile.
-	size, err := io.Copy(io.MultiWriter(&spaceGuard{w: tmp, e: e}, h), ctxReader{ctx, r})
+	// quotaGuard stops an upload of unknown size once it can't fit.
+	size, err := io.Copy(io.MultiWriter(guard, &spaceGuard{w: tmp, e: e}, h), ctxReader{ctx, r})
 	if err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
@@ -135,12 +153,17 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 		if err != nil {
 			return err
 		}
+		var oldSize, added int64 = 0, 1
 		if prev := objs.Get([]byte(key)); prev != nil {
 			old, err := decodeObject(prev)
 			if err != nil {
 				return err
 			}
-			oldBlob = old.Blob
+			oldBlob, oldSize, added = old.Blob, old.Size, 0
+		}
+		// The quota check that counts: concurrent uploads serialize here.
+		if err := adjustUsage(tx, bucket, size-oldSize, added, true); err != nil {
+			return err
 		}
 		if err := objs.Put([]byte(key), val); err != nil {
 			return err
@@ -251,6 +274,10 @@ func (e *Engine) Delete(ctx context.Context, bucket, key string) error {
 			return err
 		}
 		if err := objs.Delete([]byte(key)); err != nil {
+			return err
+		}
+		// Trash doesn't count toward usage, so this frees quota either way.
+		if err := adjustUsage(tx, bucket, -rec.Size, -1, false); err != nil {
 			return err
 		}
 		if e.trashRetention > 0 {

@@ -63,6 +63,10 @@ curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","filename":"I
 curl -H "$H" localhost:8080/v1/trash/invoices                      # list, newest first
 curl -X POST -H "$H" localhost:8080/v1/trash/invoices/<id>/restore  # put it back
 
+# Cap a bucket at 5 GiB (server admin key; 0 removes the cap). Uploads that
+# don't fit get 507 QuotaExceeded; files in trash don't count:
+curl -X PATCH -H "$H" -d '{"quotaBytes":5368709120}' localhost:8080/v1/buckets/invoices
+
 # Serve a whole bucket's files without a key (e.g. website assets):
 curl -X PATCH -H "$H" -d '{"public":true}' localhost:8080/v1/buckets/site-assets
 ```
