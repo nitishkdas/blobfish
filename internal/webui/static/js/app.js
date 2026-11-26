@@ -2,7 +2,7 @@
 // only to the /v1 API with the API key the user pastes in.
 
 import { api, forgetKey, loadKey, saveKey, session, showError } from "./api.js";
-import { h, icon, iconButton, toast, wireDialogBackdrops } from "./dom.js";
+import { ask, emptyState, formatSize, h, icon, iconButton, toast, wireDialogBackdrops } from "./dom.js";
 import { reload, renderFiles, showRoute } from "./files.js";
 import { describeScope, loadKeys, renderKeysPage } from "./keys.js";
 import { renderTrash, showTrash } from "./trash.js";
@@ -22,7 +22,7 @@ function renderLogin(message = "") {
   });
   const remember = h("input", { type: "checkbox" });
   const error = h("p", { class: "error", role: "alert" }, message);
-  const submit = h("button", { class: "primary", type: "submit" }, "Sign in");
+  const submit = h("button", { class: "primary block", type: "submit" }, "Sign in");
 
   const form = h("form", {
     onsubmit: async (ev) => {
@@ -47,10 +47,12 @@ function renderLogin(message = "") {
 
   root().className = "";
   root().replaceChildren(h("main", { class: "login" },
-    h("img", { src: "favicon.svg", alt: "" }),
-    h("h1", {}, "BlobFish"),
-    h("p", { class: "muted" }, "Sign in with an API key. It stays in this browser and is sent only to this server."),
-    form));
+    h("div", { class: "login-card" },
+      h("img", { src: "favicon.svg", alt: "" }),
+      h("h1", {}, "Sign in to BlobFish"),
+      h("p", { class: "muted" }, "Use an API key. It stays in this browser and is sent only to this server."),
+      form),
+    h("p", { class: "login-foot" }, "No key? A server admin can create one, or find the first one in ", h("code", {}, "<data_dir>/initial-admin-key"), ".")));
   input.focus();
 }
 
@@ -116,49 +118,64 @@ window.addEventListener("hashchange", route);
 function renderApp() {
   root().className = "";
   root().replaceChildren(h("div", { class: "shell" },
-    h("header", { class: "top" },
-      h("img", { src: "favicon.svg", alt: "" }),
-      h("span", { class: "brand" }, "BlobFish"),
-      h("span", { class: "spacer" }),
-      isServerAdmin() && h("a", {
-        class: "link with-icon", href: "#/keys", "aria-current": state.route.view === "keys" ? "page" : null,
-      }, icon("key"), "API keys")),
-    h("nav", { class: "side", "aria-label": "Buckets" }, renderSidebar()),
+    h("nav", { class: "side", "aria-label": "Main" }, renderSidebar()),
     renderMain()));
 }
 
 function renderSidebar() {
   const r = state.route;
+  const inBucket = ["files", "trash", "settings"].includes(r.view);
   const items = state.buckets.length === 0
-    ? h("p", { class: "muted side-empty" }, isServerAdmin() ? "No buckets yet." : "This key has no buckets it can read.")
-    : h("ul", {}, state.buckets.map((b) =>
+    ? h("p", { class: "side-empty" }, isServerAdmin() ? "No buckets yet." : "This key has no buckets it can read.")
+    : h("ul", { class: "side-list" }, state.buckets.map((b) =>
       h("li", {}, h("a", {
         href: `#/b/${encodeURIComponent(b.name)}/`,
-        "aria-current": ["files", "trash", "settings"].includes(r.view) && b.name === r.bucket ? "true" : "false",
-      }, h("span", { class: "bucket-name" }, b.name),
-      b.public && h("span", { class: "public-mark", title: "Public: files can be read without a key" }, icon("globe", 14))))));
-
-  let form = null;
-  if (isServerAdmin()) {
-    const name = h("input", { placeholder: "new-bucket", "aria-label": "New bucket name", pattern: "[a-z0-9][a-z0-9.\\-]{1,61}[a-z0-9]" });
-    form = h("form", {
-      onsubmit: async (ev) => {
-        ev.preventDefault();
-        const n = name.value.trim();
-        if (!n) return;
-        try {
-          await api("PUT", `/v1/buckets/${encodeURIComponent(n)}`);
-          toast(`Created bucket ${n}`);
-          state.buckets = (await api("GET", "/v1/buckets")).buckets;
-          navigate({ view: "files", bucket: n, prefix: "", page: 1 });
-        } catch (err) { showError(err); }
+        "aria-current": inBucket && b.name === r.bucket ? "true" : "false",
+        title: b.name,
       },
-    }, name, h("button", { type: "submit" }, "Add"));
-  }
+      icon("database", 16),
+      h("span", { class: "bucket-name" }, b.name),
+      b.public && h("span", { class: "public-mark", title: "Public: files can be read without a key" }, icon("globe", 13)),
+      h("span", { class: "side-meta" }, formatSize(b.usedBytes || 0))))));
+
   return [
-    h("div", { class: "side-scroll" }, h("h2", {}, "Buckets"), items, form),
+    h("a", { class: "brand-row", href: "#/" },
+      h("img", { src: "favicon.svg", alt: "" }),
+      h("span", { class: "brand" }, "BlobFish")),
+    h("div", { class: "side-scroll" },
+      h("div", { class: "side-section" },
+        h("div", { class: "side-head" },
+          h("h2", {}, "Buckets"),
+          isServerAdmin() && iconButton("plus", "New bucket", newBucket, "small")),
+        items),
+      isServerAdmin() && h("div", { class: "side-section" },
+        h("div", { class: "side-head" }, h("h2", {}, "Server")),
+        h("ul", { class: "side-list" }, h("li", {}, h("a", {
+          href: "#/keys", "aria-current": r.view === "keys" ? "true" : "false",
+        }, icon("key", 16), h("span", { class: "bucket-name" }, "API keys")))))),
     renderProfile(),
   ];
+}
+
+// newBucket asks for a name and creates the bucket (server admins only).
+async function newBucket() {
+  const res = await ask({
+    title: "New bucket",
+    body: [h("p", { class: "muted" }, "Lowercase letters, numbers, dots and dashes; 3 to 63 characters. The name can't be changed later.")],
+    input: {
+      label: "Bucket name",
+      placeholder: "e.g. invoices",
+      validate: (v) => (/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(v) ? "" : "Use 3–63 lowercase letters, numbers, dots or dashes, starting and ending with a letter or number."),
+    },
+    choices: [{ label: "Cancel", value: "" }, { label: "Create bucket", value: "ok", kind: "primary" }],
+  });
+  if (!res) return;
+  try {
+    await api("PUT", `/v1/buckets/${encodeURIComponent(res.value)}`);
+    toast(`Created bucket ${res.value}`);
+    state.buckets = (await api("GET", "/v1/buckets")).buckets;
+    navigate({ view: "files", bucket: res.value, prefix: "", page: 1 });
+  } catch (err) { showError(err); }
 }
 
 // renderProfile is the signed-in key, pinned to the bottom of the sidebar.
@@ -183,13 +200,25 @@ function renderMain() {
   if (r.view === "trash" && can("w", r.bucket)) return renderTrash();
   if (r.view === "settings" && can("w", r.bucket)) return renderSettings();
   return h("section", { class: "main", "aria-label": "Files" },
-    h("p", { class: "empty" }, isServerAdmin() ? "Create a bucket to get started." : "Nothing to show for this key."));
+    emptyState({
+      icon: "database",
+      title: isServerAdmin() ? "No buckets yet" : "Nothing to show",
+      text: isServerAdmin() ? "A bucket holds files, with its own keys, quota and settings." : "This key can't read any bucket.",
+      action: isServerAdmin() && h("button", { class: "primary with-icon", onclick: newBucket }, icon("plus"), "New bucket"),
+    }));
 }
 
 ui.renderApp = renderApp;
 ui.renderMain = () => {
   const old = document.querySelector(".main");
   if (old) old.replaceWith(renderMain());
+  // Keep the sidebar's sizes and current bucket in step.
+  const side = document.querySelector(".side");
+  if (side) {
+    const scroll = side.querySelector(".side-scroll")?.scrollTop || 0;
+    side.replaceChildren(...renderSidebar());
+    side.querySelector(".side-scroll").scrollTop = scroll;
+  }
 };
 ui.reloadFiles = reload;
 

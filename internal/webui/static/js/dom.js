@@ -39,6 +39,16 @@ const ICONS = {
   globe: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18", "M3.5 12h17", "M12 3c2.4 2.5 3.6 5.5 3.6 9s-1.2 6.5-3.6 9", "M12 3c-2.4 2.5-3.6 5.5-3.6 9s1.2 6.5 3.6 9"],
   signOut: ["M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3", "M16 8l4 4-4 4", "M20 12H10"],
   file: ["M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M14 3v5h5"],
+  fileText: ["M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M14 3v5h5", "M9 13h6", "M9 17h4"],
+  image: ["M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "M9 8a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3", "M20 15l-4.5-4.5L6 20"],
+  archive: ["M4 4h16v4H4z", "M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8", "M10 12h4"],
+  film: ["M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "M10 9l5 3-5 3z"],
+  database: ["M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3s-8-1.3-8-3s3.6-3 8-3z", "M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6", "M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"],
+  sliders: ["M4 7h9", "M19 7h1", "M16 4.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5", "M4 17h3", "M13 17h7", "M10 14.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5"],
+  lock: ["M7 11h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z", "M8.5 11V8a3.5 3.5 0 0 1 7 0v3"],
+  inbox: ["M4 13l2.5-8h11l2.5 8", "M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5", "M4 13h4.5l1 2h5l1-2H20"],
+  bolt: ["M13 3L5 14h6l-1 7 8-11h-6z"],
+  storage: ["M4 5h16v5H4z", "M4 14h16v5H4z", "M7.5 7.5h.01", "M7.5 16.5h.01"],
 };
 
 export function icon(name, size = 18) {
@@ -184,4 +194,14 @@ export function wireDialogBackdrops() {
   for (const d of document.querySelectorAll("dialog")) {
     d.addEventListener("click", (e) => { if (e.target === d) d.close(); });
   }
+}
+
+// emptyState is the placeholder for a list with nothing in it: an icon,
+// a short title, one line of help and an optional action.
+export function emptyState({ icon: name, title, text = "", action = null }) {
+  return h("div", { class: "empty-state" },
+    h("span", { class: "empty-icon", "aria-hidden": "true" }, icon(name, 22)),
+    h("h3", {}, title),
+    text && h("p", {}, text),
+    action && h("div", { class: "empty-actions" }, action));
 }

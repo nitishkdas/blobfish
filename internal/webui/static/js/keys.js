@@ -1,7 +1,7 @@
 // API keys page. Only "*:admin" keys see it; the server enforces the same.
 
 import { api, showError } from "./api.js";
-import { confirmDialog, copyText, dateFmt, h, icon, iconButton, toast } from "./dom.js";
+import { confirmDialog, copyText, dateFmt, emptyState, h, icon, iconButton, toast } from "./dom.js";
 import { rerenderMain, state } from "./state.js";
 
 const PERMS = [
@@ -28,13 +28,18 @@ export async function loadKeys() {
 
 export function renderKeysPage() {
   return h("section", { class: "main keys-page", "aria-label": "API keys" },
-    h("div", { class: "page-head" },
-      h("h1", {}, "API keys"),
-      h("p", { class: "muted" },
-        "Give each app its own key, limited to the buckets it needs. A key for one bucket gets “access denied” everywhere else.")),
-    renderKeyForm(),
-    h("h2", { class: "section-title" }, `Existing keys (${state.apiKeys.length})`),
-    renderKeyTable());
+    h("header", { class: "page-head" },
+      h("span", { class: "bucket-icon", "aria-hidden": "true" }, icon("key", 20)),
+      h("div", {},
+        h("h1", {}, "API keys"),
+        h("p", { class: "muted" },
+          "Give each app its own key, limited to the buckets it needs. A key for one bucket gets “access denied” everywhere else."))),
+    h("div", { class: "settings-group" },
+      h("h2", { class: "group-title" }, "New key"),
+      renderKeyForm()),
+    h("div", { class: "settings-group" },
+      h("h2", { class: "group-title" }, "Keys ", h("span", { class: "count" }, String(state.apiKeys.length))),
+      renderKeyTable()));
 }
 
 function renderKeyForm() {
@@ -69,7 +74,7 @@ function renderKeyForm() {
 
   const submit = h("button", { class: "primary", type: "submit" }, "Create key");
   return h("form", {
-    class: "card key-form",
+    class: "panel key-form",
     onsubmit: async (ev) => {
       ev.preventDefault();
       const scopes = [...new Set([...rows.querySelectorAll(".scope-row")].map((r) =>
@@ -86,17 +91,16 @@ function renderKeyForm() {
       }
     },
   },
-  h("h2", { class: "section-title" }, "New key"),
   h("label", { class: "field" }, "Name", name),
   h("div", { class: "field" }, h("span", {}, "Access"), rows,
-    h("button", { type: "button", class: "link with-icon add-scope", onclick: () => addRow("*") }, icon("plus"), "Add another bucket")),
+    h("button", { type: "button", class: "link with-icon add-scope", onclick: () => addRow("*") }, icon("plus", 16), "Add another bucket")),
   hint,
   h("div", { class: "row" }, submit));
 }
 
 function renderKeyTable() {
-  if (state.apiKeys.length === 0) return h("p", { class: "empty" }, "No keys.");
-  return h("table", {},
+  if (state.apiKeys.length === 0) return h("div", { class: "table-wrap" }, emptyState({ icon: "key", title: "No keys" }));
+  return h("div", { class: "table-wrap" }, h("table", {},
     h("thead", {}, h("tr", {},
       h("th", { scope: "col" }, "Name"),
       h("th", { scope: "col" }, "Access"),
@@ -109,7 +113,7 @@ function renderKeyTable() {
       h("td", {}, h("div", { class: "chips" }, k.scopes.map((sc) =>
         h("span", { class: sc.startsWith("*:admin") ? "chip strong" : "chip" }, describeScope(sc))))),
       h("td", { class: "when" }, dateFmt.format(new Date(k.created))),
-      h("td", { class: "actions" }, iconButton("trash", `Revoke ${k.name}`, () => revokeKey(k), "danger"))))));
+      h("td", { class: "actions" }, iconButton("trash", `Revoke ${k.name}`, () => revokeKey(k), "danger")))))));
 }
 
 async function revokeKey(k) {

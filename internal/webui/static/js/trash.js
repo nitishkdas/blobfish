@@ -2,7 +2,7 @@
 // Restore and Delete forever. Shown to keys that may write the bucket.
 
 import { api, showError } from "./api.js";
-import { confirmDialog, dateFmtLong, formatSize, h, icon, iconButton, relativeTime, toast } from "./dom.js";
+import { confirmDialog, dateFmtLong, emptyState, formatSize, h, icon, iconButton, relativeTime, toast } from "./dom.js";
 import { renderBucketHeader } from "./bucket.js";
 import { rerenderMain, state } from "./state.js";
 
@@ -46,21 +46,23 @@ export function renderTrash() {
   return h("section", { class: "main", "aria-label": "Trash" },
     renderBucketHeader(bucket, "trash"),
     h("div", { class: "toolbar" },
-      h("p", { class: "muted trash-note" }, days > 0
-      ? `Deleted files stay here for ${days} day${days === 1 ? "" : "s"}, then are deleted for good. Share links work again when a file is restored.`
-      : "Trash is turned off on this server, so deleted files are removed at once. Files deleted before that stay here until their time is up."),
+      h("div", { class: "callout" }, icon("info", 16), h("p", {}, days > 0
+        ? `Deleted files stay here for ${days} day${days === 1 ? "" : "s"}, then are deleted for good. Share links work again when a file is restored.`
+        : "Trash is turned off on this server, so deleted files are removed at once. Files deleted before that stay here until their time is up.")),
       h("div", { class: "toolbar-actions" },
-        T.items.length > 0 && h("button", { class: "danger", onclick: emptyTrash }, "Empty trash"))),
-    !T.loaded ? h("p", { class: "empty" }, "Loading…")
-      : T.items.length === 0 ? h("p", { class: "empty" }, "Trash is empty.")
-        : renderTable(),
-    T.nextCursor && h("div", { class: "pager" },
-      h("span", { class: "spacer" }),
-      h("button", { onclick: loadMore }, "Show more")));
+        T.items.length > 0 && h("button", { class: "danger with-icon", onclick: emptyTrash }, icon("trash", 16), "Empty trash"))),
+    h("div", { class: "table-wrap" },
+      !T.loaded ? h("p", { class: "loading" }, "Loading…")
+        : T.items.length === 0 ? emptyState({ icon: "trash", title: "Trash is empty", text: "Files you delete from this bucket show up here until they are purged." })
+          : renderTable(),
+      T.loaded && T.items.length > 0 && h("div", { class: "pager" },
+        h("span", { class: "muted" }, `${T.items.length}${T.nextCursor ? "+" : ""} item${T.items.length === 1 ? "" : "s"}`),
+        h("span", { class: "spacer" }),
+        T.nextCursor && h("button", { class: "small", onclick: loadMore }, "Show more"))));
 }
 
 function renderTable() {
-  return h("table", {},
+  return h("table", { class: "files-table" },
     h("thead", {}, h("tr", {},
       h("th", { scope: "col" }, "Name"),
       h("th", { scope: "col", class: "num" }, "Size"),
@@ -72,7 +74,7 @@ function renderTable() {
       const purge = new Date(it.purgeAt);
       return h("tr", {},
         h("td", { class: "name", title: it.object.key },
-          h("span", { class: "with-icon trash-name" }, icon("file"), it.object.key)),
+          h("span", { class: "with-icon trash-name" }, h("span", { class: "file-icon" }, icon("file", 16)), it.object.key)),
         h("td", { class: "num" }, formatSize(it.object.size)),
         h("td", { class: "when", title: dateFmtLong.format(deleted) }, relativeTime(deleted)),
         h("td", { class: "when", title: dateFmtLong.format(purge) }, relativeTime(purge)),

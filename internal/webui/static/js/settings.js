@@ -2,8 +2,8 @@
 // allowed to change it (the server checks every request anyway).
 
 import { api, showError } from "./api.js";
-import { ask, confirmDialog, formatInt, formatSize, h, icon, relativeTime, toast } from "./dom.js";
-import { renderBucketHeader } from "./bucket.js";
+import { ask, confirmDialog, formatInt, formatSize, h, relativeTime, toast } from "./dom.js";
+import { meterBar, renderBucketHeader, visibilityBadge } from "./bucket.js";
 import { navigate } from "./router.js";
 import { bucketInfo, can, isServerAdmin, rerenderMain, state, ui } from "./state.js";
 import { openUploadLinks } from "./uplinks.js";
@@ -35,14 +35,23 @@ function whenClosed(id) {
   }, { once: true });
 }
 
-function card({ title, description, status, actions = [], body = null, danger = false }) {
-  return h("section", { class: danger ? "card danger-card" : "card" },
-    h("div", { class: "card-text" },
-      h("h2", {}, title),
-      description && h("p", { class: "muted" }, description),
-      status && h("div", { class: "card-status" }, status),
-      body),
-    actions.filter(Boolean).length > 0 && h("div", { class: "card-actions" }, actions));
+// row is one setting: what it is (left), its current state (middle) and
+// the button that changes it (right).
+function row({ title, description, status, actions = [] }) {
+  return h("section", { class: "setting-row" },
+    h("div", { class: "setting-label" },
+      h("h3", {}, title),
+      description && h("p", {}, description)),
+    h("div", { class: "setting-value" }, status),
+    h("div", { class: "setting-actions" }, actions.filter(Boolean)));
+}
+
+function group(title, rows, { danger = false } = {}) {
+  rows = rows.filter(Boolean);
+  if (rows.length === 0) return null;
+  return h("div", { class: "settings-group" },
+    h("h2", { class: "group-title" }, title),
+    h("div", { class: danger ? "panel danger-panel" : "panel" }, rows));
 }
 
 export function renderSettings() {
@@ -50,95 +59,94 @@ export function renderSettings() {
   const b = bucketInfo(bucket) || {};
   const S = state.settings;
   const admin = can("admin", bucket);
+  const loading = h("span", { class: "muted" }, "Loading…");
 
-  const cards = [
-    storageCard(b),
-    admin && card({
-      title: "Visibility",
-      description: "Public buckets let anyone download a file if they have its address, without a key. Listing, uploading and deleting always need a key.",
-      status: b.public
-        ? h("span", { class: "with-icon" }, icon("globe", 16), h("strong", {}, "Public"), " · files can be opened by anyone with the address")
-        : h("span", {}, h("strong", {}, "Private"), " · every request needs a key or a link"),
-      actions: [h("button", { onclick: () => setVisibility(bucket, !b.public) }, b.public ? "Make private" : "Make public")],
-    }),
-    admin && card({
-      title: "Browser access",
-      description: "Websites whose pages may upload to and download from this bucket directly, for example with presigned URLs from your app.",
-      status: (b.corsOrigins || []).length === 0
-        ? h("span", { class: "muted" }, "No websites")
-        : h("ul", { class: "card-list" }, b.corsOrigins.map((o) => h("li", { class: "mono" }, o === "*" ? "* (any website)" : o))),
-      actions: [h("button", { onclick: () => { editBrowserAccess(bucket); whenClosed("cors"); } }, "Edit")],
-    }),
-    can("w", bucket) && card({
-      title: "Upload links",
-      description: "Links that let people without a key send files into a folder. They can't see, replace or delete anything.",
-      status: S.uploadLinks === null ? h("span", { class: "muted" }, "Loading…") : uploadLinksSummary(S.uploadLinks),
-      actions: [h("button", { onclick: () => { openUploadLinks(bucket, ""); whenClosed("uplinks"); } }, "Manage")],
-    }),
-    admin && card({
-      title: "Webhooks",
-      description: "Signed notifications to your apps when files are added, deleted or restored.",
-      status: S.webhooks === null ? h("span", { class: "muted" }, "Loading…") : webhooksSummary(S.webhooks),
-      actions: [h("button", { onclick: () => { openWebhooks(bucket); whenClosed("webhooks"); } }, "Manage")],
-    }),
-    admin && card({
+  const groups = [
+    group("Storage and access", [
+      storageRow(b),
+      admin && row({
+        title: "Visibility",
+        description: "Public buckets let anyone download a file if they have its address. Listing, uploading and deleting always need a key.",
+        status: h("div", { class: "value-line" }, visibilityBadge(b),
+          h("span", { class: "muted" }, b.public ? "Anyone with a file's address can open it" : "Every request needs a key or a link")),
+        actions: [h("button", { onclick: () => setVisibility(bucket, !b.public) }, b.public ? "Make private" : "Make public")],
+      }),
+      admin && row({
+        title: "Browser access",
+        description: "Websites whose pages may upload to and download from this bucket directly, for example with presigned URLs.",
+        status: (b.corsOrigins || []).length === 0
+          ? h("span", { class: "muted" }, "No websites")
+          : h("ul", { class: "value-list" }, b.corsOrigins.map((o) => h("li", { class: "mono" }, o === "*" ? "* (any website)" : o))),
+        actions: [h("button", { onclick: () => { editBrowserAccess(bucket); whenClosed("cors"); } }, "Edit")],
+      }),
+    ]),
+    group("Integrations", [
+      can("w", bucket) && row({
+        title: "Upload links",
+        description: "Let people without a key send files into a folder. They can't see, replace or delete anything.",
+        status: S.uploadLinks === null ? loading : uploadLinksSummary(S.uploadLinks),
+        actions: [h("button", { onclick: () => { openUploadLinks(bucket, ""); whenClosed("uplinks"); } }, "Manage")],
+      }),
+      admin && row({
+        title: "Webhooks",
+        description: "Signed notifications to your apps when files are added, deleted or restored.",
+        status: S.webhooks === null ? loading : webhooksSummary(S.webhooks),
+        actions: [h("button", { onclick: () => { openWebhooks(bucket); whenClosed("webhooks"); } }, "Manage")],
+      }),
+    ]),
+    admin && group("Danger zone", [row({
       title: "Delete bucket",
-      description: "Only an empty bucket can be deleted: move its files out or delete them, then empty its trash. This can't be undone.",
+      description: "Only an empty bucket can be deleted: delete or move its files, then empty its trash. This can't be undone.",
+      status: null,
       actions: [h("button", { class: "danger-solid", onclick: () => deleteBucket(bucket) }, "Delete bucket")],
-      danger: true,
-    }),
+    })], { danger: true }),
   ];
 
   return h("section", { class: "main", "aria-label": "Bucket settings" },
     renderBucketHeader(bucket, "settings"),
-    h("div", { class: "cards" }, cards.filter(Boolean)));
+    h("div", { class: "settings" }, groups.filter(Boolean)));
 }
 
-function storageCard(b) {
+function storageRow(b) {
   const pct = b.quotaBytes ? Math.min(100, (b.usedBytes / b.quotaBytes) * 100) : 0;
-  return card({
+  return row({
     title: "Storage",
     description: "Space taken by this bucket's files. Files in trash don't count.",
     status: h("div", { class: "usage" },
       h("div", { class: "usage-numbers" },
         h("strong", {}, formatSize(b.usedBytes || 0)),
-        b.quotaBytes ? ` of ${formatSize(b.quotaBytes)} quota` : " · no quota",
+        h("span", { class: "muted" }, b.quotaBytes ? ` of ${formatSize(b.quotaBytes)}` : " used · no quota"),
         h("span", { class: "muted" }, ` · ${formatInt(b.objects || 0)} file${b.objects === 1 ? "" : "s"}`)),
-      b.quotaBytes > 0 && usageBar(pct)),
+      b.quotaBytes > 0 && meterBar(pct, `${Math.round(pct)}% of the quota used`)),
     actions: [isServerAdmin() && h("button", { onclick: () => editQuota(b.name) }, b.quotaBytes ? "Change quota" : "Set quota")],
   });
-}
-
-// usageBar sets its width through CSSOM: the CSP forbids style attributes.
-function usageBar(pct) {
-  const fill = h("span", {});
-  fill.style.width = `${pct}%`;
-  return h("div", {
-    class: pct >= 90 ? "usage-bar near-full" : "usage-bar", role: "img", "aria-label": `${Math.round(pct)}% of the quota used`,
-  }, fill);
 }
 
 function uploadLinksSummary(links) {
   const now = new Date();
   const live = links.filter((l) => (!l.expires || new Date(l.expires) > now) && !(l.maxFiles && l.uploads >= l.maxFiles));
   if (links.length === 0) return h("span", { class: "muted" }, "No upload links");
-  return h("ul", { class: "card-list" }, live.slice(0, 5).map((l) => h("li", {},
-    h("strong", {}, l.label || (l.prefix ? l.prefix : "Top level")),
-    h("span", { class: "muted" }, ` · ${l.uploads}${l.maxFiles ? ` of ${l.maxFiles}` : ""} file${l.uploads === 1 && !l.maxFiles ? "" : "s"}`,
+  return h("ul", { class: "value-list" }, live.slice(0, 5).map((l) => h("li", {},
+    h("span", { class: "dot ok", "aria-hidden": "true" }),
+    h("span", { class: "value-main" }, l.label || (l.prefix ? l.prefix : "Top level")),
+    h("span", { class: "muted" }, `${l.uploads}${l.maxFiles ? ` of ${l.maxFiles}` : ""} file${l.uploads === 1 && !l.maxFiles ? "" : "s"}`,
       l.expires ? ` · expires ${relativeTime(new Date(l.expires))}` : " · never expires"))),
   live.length > 5 && h("li", { class: "muted" }, `and ${live.length - 5} more`),
-  live.length < links.length && h("li", { class: "muted" }, `${links.length - live.length} expired or full`));
+  live.length < links.length && h("li", { class: "muted" },
+    h("span", { class: "dot", "aria-hidden": "true" }), `${links.length - live.length} expired or full`));
 }
 
 function webhooksSummary(hooks) {
   if (hooks.length === 0) return h("span", { class: "muted" }, "No webhooks");
-  return h("ul", { class: "card-list" }, hooks.map((w) => {
+  return h("ul", { class: "value-list" }, hooks.map((w) => {
     const failing = w.lastFailure && (!w.lastSuccess || new Date(w.lastFailure) > new Date(w.lastSuccess));
     return h("li", {},
-      h("span", { class: "mono" }, w.url),
+      h("span", { class: failing ? "dot bad" : w.lastSuccess ? "dot ok" : "dot", "aria-hidden": "true" }),
+      h("span", { class: "mono value-main" }, w.url),
       failing
-        ? h("span", { class: "card-bad" }, ` · failing (${w.lastError})${w.pending ? `, ${w.pending} waiting` : ""}`)
-        : h("span", { class: "muted" }, w.lastSuccess ? ` · last delivered ${relativeTime(new Date(w.lastSuccess))}` : " · nothing sent yet"));
+        ? h("span", { class: "card-bad" }, `failing${w.pending ? ` · ${w.pending} waiting` : ""}`)
+        : h("span", { class: "muted" }, w.lastSuccess ? `last delivered ${relativeTime(new Date(w.lastSuccess))}` : "nothing sent yet"),
+      failing && h("span", { class: "value-error", title: w.lastError }, w.lastError));
   }));
 }
 

@@ -2,7 +2,7 @@
 
 import { api, bucketPath, loadPref, objectPath, presign, savePref, showError } from "./api.js";
 import {
-  ask, baseName, confirmDialog, copyText, dateFmt, dateFmtLong, formatInt, formatSize, h, icon, iconButton,
+  ask, baseName, confirmDialog, emptyState, copyText, dateFmt, dateFmtLong, formatInt, formatSize, h, icon, iconButton,
   relativeTime, toast,
 } from "./dom.js";
 import { navigate } from "./router.js";
@@ -96,14 +96,14 @@ export function renderFiles() {
       renderCrumbs(),
       h("div", { class: "toolbar-actions" },
         canWrite && h("button", {
-          class: "link", onclick: () => openUploadLinks(r.bucket, r.prefix),
+          class: "with-icon ghost", onclick: () => openUploadLinks(r.bucket, r.prefix),
           title: "Let people without a key send files into this folder",
-        }, "Upload links"),
-        canWrite && h("button", { class: "with-icon", onclick: newFolder }, icon("folderPlus"), "New folder"),
-        canWrite && h("button", { class: "with-icon", onclick: () => pickAndUpload({ folder: true }) }, icon("folder"), "Upload folder"),
-        canWrite && h("button", { class: "primary with-icon", onclick: () => pickAndUpload({ folder: false }) }, icon("upload"), "Upload"))),
-    L.loaded ? renderTable(canWrite) : h("p", { class: "empty" }, "Loading…"),
-    L.loaded && renderPager());
+        }, icon("inbox", 16), "Upload links"),
+        canWrite && h("span", { class: "toolbar-sep", "aria-hidden": "true" }),
+        canWrite && h("button", { class: "with-icon", onclick: newFolder }, icon("folderPlus", 16), "New folder"),
+        canWrite && h("button", { class: "with-icon", onclick: () => pickAndUpload({ folder: true }) }, icon("folder", 16), "Upload folder"),
+        canWrite && h("button", { class: "primary with-icon", onclick: () => pickAndUpload({ folder: false }) }, icon("upload", 16), "Upload"))),
+    L.loaded ? renderTable(canWrite) : h("div", { class: "table-wrap" }, h("p", { class: "loading" }, "Loading…")));
   return main;
 }
 
@@ -111,7 +111,7 @@ function renderCrumbs() {
   const r = state.route;
   const parts = r.prefix.split("/").filter(Boolean);
   const crumbs = [h("button", { class: "with-icon", onclick: () => go({ prefix: "", page: 1 }), "aria-current": parts.length ? null : "page" },
-    icon("folder", 16), "All files")];
+    icon("database", 15), r.bucket)];
   parts.forEach((p, i) => {
     const prefix = parts.slice(0, i + 1).join("/") + "/";
     const last = i === parts.length - 1;
@@ -125,17 +125,23 @@ function renderTable(canWrite) {
   const r = state.route;
   const L = state.listing;
   if (L.folders.length === 0 && L.files.length === 0) {
-    if (r.prefix) {
-      return h("div", { class: "empty" },
-        h("p", {}, "This folder is empty."),
-        canWrite && h("p", { class: "muted" }, "Folders exist only while they hold files: upload or drop something here and it will stay."));
-    }
-    return h("p", { class: "empty" }, canWrite ? "No files yet. Upload or drop files here." : "No files yet.");
+    const upload = canWrite && h("button", { class: "primary with-icon", onclick: () => pickAndUpload({ folder: false }) }, icon("upload", 16), "Upload files");
+    return h("div", { class: "table-wrap" }, r.prefix
+      ? emptyState({
+        icon: "folder", title: "This folder is empty",
+        text: canWrite ? "Folders exist only while they hold files: upload or drop something here and it will stay." : "",
+        action: upload,
+      })
+      : emptyState({
+        icon: "upload", title: "No files yet",
+        text: canWrite ? "Upload files or drag them onto this page." : "Files added to this bucket will show up here.",
+        action: upload,
+      }));
   }
   const rows = [
     ...L.folders.map((p) => h("tr", {},
       h("td", { class: "name" }, h("button", { class: "with-icon", onclick: () => go({ prefix: p, page: 1 }) },
-        icon("folder"), p.slice(r.prefix.length))),
+        h("span", { class: "file-icon folder" }, icon("folder", 16)), p.slice(r.prefix.length, -1) || p.slice(r.prefix.length))),
       h("td", { class: "num" }, "—"),
       h("td", { class: "when" }, ""),
       h("td", { class: "actions" }))),
@@ -143,7 +149,8 @@ function renderTable(canWrite) {
       const name = o.key.slice(r.prefix.length);
       return h("tr", {},
         h("td", { class: "name", title: o.key },
-          h("button", { class: "with-icon file-link", onclick: () => openFile(o), title: `Open ${name} in a new tab` }, icon("file"), name)),
+          h("button", { class: "with-icon file-link", onclick: () => openFile(o), title: `Open ${name} in a new tab` },
+            h("span", { class: "file-icon" }, icon(fileIconName(o), 16)), name)),
         h("td", { class: "num" }, formatSize(o.size)),
         h("td", { class: "when" }, dateFmt.format(new Date(o.modified))),
         h("td", { class: "actions" },
@@ -153,13 +160,26 @@ function renderTable(canWrite) {
           canWrite && iconButton("trash", `Delete ${name}`, () => deleteObject(o), "danger")));
     }),
   ];
-  return h("table", { class: "files-table" },
+  return h("div", { class: "table-wrap" }, h("table", { class: "files-table" },
     h("thead", {}, h("tr", {},
       h("th", { scope: "col" }, "Name"),
       h("th", { scope: "col", class: "num" }, "Size"),
       h("th", { scope: "col", class: "when" }, "Modified"),
       h("th", { scope: "col", class: "actions" }, h("span", { class: "visually-hidden" }, "Actions")))),
-    h("tbody", {}, rows));
+    h("tbody", {}, rows)),
+  renderPager());
+}
+
+// fileIconName picks an icon from the content type or the extension.
+function fileIconName(o) {
+  const t = (o.contentType || "").toLowerCase();
+  const ext = o.key.slice(o.key.lastIndexOf(".") + 1).toLowerCase();
+  if (t.startsWith("image/")) return "image";
+  if (t.startsWith("video/")) return "film";
+  if (/zip|tar|gzip|compressed|x-7z|x-rar/.test(t) || ["zip", "gz", "tgz", "tar", "7z", "rar", "zst", "xz"].includes(ext)) return "archive";
+  if (t.startsWith("text/") || t === "application/pdf" || t.includes("json") || t.includes("xml") ||
+    ["pdf", "txt", "md", "csv", "json", "doc", "docx", "odt", "rtf"].includes(ext)) return "fileText";
+  return "file";
 }
 
 function renderPager() {
@@ -178,13 +198,15 @@ function renderPager() {
   sizeSelect.value = String(L.size);
 
   return h("nav", { class: "pager", "aria-label": "Pages" },
-    h("span", { class: "muted" }, count ? `Items ${formatInt(first)}–${formatInt(first + count - 1)}` : ""),
+    h("span", { class: "muted" }, hasPrev || hasNext
+      ? `Items ${formatInt(first)}–${formatInt(first + count - 1)}`
+      : `${formatInt(count)} item${count === 1 ? "" : "s"}`),
     h("span", { class: "spacer" }),
     h("label", { class: "pager-size muted" }, "Per page", sizeSelect),
     (hasPrev || hasNext) && h("div", { class: "pager-nav" },
-      h("button", { class: "with-icon", disabled: !hasPrev, onclick: () => go({ page: L.page - 1 }) }, icon("left"), "Prev"),
+      h("button", { class: "with-icon small", disabled: !hasPrev, onclick: () => go({ page: L.page - 1 }) }, icon("left", 16), "Prev"),
       h("span", { class: "pager-page", "aria-current": "page" }, `Page ${L.page}`),
-      h("button", { class: "with-icon", disabled: !hasNext, onclick: () => go({ page: L.page + 1 }) }, "Next", icon("right"))));
+      h("button", { class: "with-icon small", disabled: !hasNext, onclick: () => go({ page: L.page + 1 }) }, "Next", icon("right", 16))));
 }
 
 // ---------- Actions ----------
