@@ -1,58 +1,43 @@
 /* BlobFish UI. Neutral zinc surfaces, one blue accent for focus, selection
    and progress; the pink lives only in the logo. Desktop-first. */
 :root {
-  --bg: #fafafa;          /* app background (sidebar, page) */
-  --panel: #ffffff;       /* cards, tables, dialogs */
-  --subtle: #f4f4f5;      /* table heads, footers, hovers */
-  --line: #e4e4e7;
-  --line-strong: #d4d4d8;
-  --text: #18181b;
-  --muted: #71717a;
-  --faint: #a1a1aa;
-  --ink: #18181b;         /* primary buttons */
-  --ink-text: #ffffff;
-  --accent: #2563eb;
-  --accent-soft: #eff4ff;
-  --accent-text: #1d4ed8;
-  --ok: #16a34a;
-  --danger: #dc2626;
-  --danger-soft: #fef2f2;
-  --row-hover: #f8f8f9;
-  --selected: #f0f0f2;
+  /* Colours are light-dark(light, dark): color-scheme picks one. It
+     follows the system unless the theme switch set data-theme. */
+  color-scheme: light dark;
+  --on-danger: light-dark(#ffffff, #1c0a0a);
+  --bg: light-dark(#fafafa, #0c0c0e);          /* app background (sidebar, page) */
+  --panel: light-dark(#ffffff, #141417);       /* cards, tables, dialogs */
+  --subtle: light-dark(#f4f4f5, #1b1b1f);      /* table heads, footers, hovers */
+  --line: light-dark(#e4e4e7, #27272a);
+  --line-strong: light-dark(#d4d4d8, #3f3f46);
+  --text: light-dark(#18181b, #f4f4f5);
+  --muted: light-dark(#71717a, #a1a1aa);
+  --faint: light-dark(#a1a1aa, #71717a);
+  --ink: light-dark(#18181b, #f4f4f5);         /* primary buttons */
+  --ink-text: light-dark(#ffffff, #18181b);
+  --accent: light-dark(#2563eb, #60a5fa);
+  --accent-soft: light-dark(#eff4ff, #172036);
+  --accent-text: light-dark(#1d4ed8, #93c5fd);
+  --ok: light-dark(#16a34a, #4ade80);
+  --danger: light-dark(#dc2626, #f87171);
+  --danger-soft: light-dark(#fef2f2, #2a1414);
+  --row-hover: light-dark(#f8f8f9, #18181c);
+  --selected: light-dark(#f0f0f2, #222227);
   --radius: 10px;
   --radius-sm: 7px;
-  --shadow-xs: 0 1px 2px rgb(16 16 20 / .05);
-  --shadow-md: 0 4px 12px rgb(16 16 20 / .06), 0 1px 3px rgb(16 16 20 / .05);
-  --shadow-lg: 0 20px 48px rgb(16 16 20 / .16), 0 2px 8px rgb(16 16 20 / .06);
+  --shadow-1: light-dark(rgb(16 16 20 / .05), rgb(0 0 0 / .4));
+  --shadow-2: light-dark(rgb(16 16 20 / .06), rgb(0 0 0 / .4));
+  --shadow-3: light-dark(rgb(16 16 20 / .16), rgb(0 0 0 / .6));
+  --shadow-xs: 0 1px 2px var(--shadow-1);
+  --shadow-md: 0 4px 12px var(--shadow-2), 0 1px 3px var(--shadow-1);
+  --shadow-lg: 0 20px 48px var(--shadow-3), 0 2px 8px var(--shadow-2);
   --font: "Inter", "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --ease: cubic-bezier(.2, 0, 0, 1);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0c0c0e;
-    --panel: #141417;
-    --subtle: #1b1b1f;
-    --line: #27272a;
-    --line-strong: #3f3f46;
-    --text: #f4f4f5;
-    --muted: #a1a1aa;
-    --faint: #71717a;
-    --ink: #f4f4f5;
-    --ink-text: #18181b;
-    --accent: #60a5fa;
-    --accent-soft: #172036;
-    --accent-text: #93c5fd;
-    --ok: #4ade80;
-    --danger: #f87171;
-    --danger-soft: #2a1414;
-    --row-hover: #18181c;
-    --selected: #222227;
-    --shadow-xs: 0 1px 2px rgb(0 0 0 / .4);
-    --shadow-md: 0 4px 12px rgb(0 0 0 / .4);
-    --shadow-lg: 0 20px 48px rgb(0 0 0 / .6);
-  }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+.theme-switching *, .theme-switching *::before, .theme-switching *::after { transition: none !important; }
 
 /* ---------- Base ---------- */
 * { box-sizing: border-box; }
@@ -102,9 +87,8 @@ button.primary, label.button.primary {
 button.primary:hover, label.button.primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--bg)); }
 button.danger { color: var(--danger); }
 button.danger:hover { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
-button.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+button.danger-solid { background: var(--danger); border-color: var(--danger); color: var(--on-danger); }
 button.danger-solid:hover { background: color-mix(in srgb, var(--danger) 88%, #000); }
-@media (prefers-color-scheme: dark) { button.danger-solid { color: #1c0a0a; } }
 button.ghost { background: none; border-color: transparent; box-shadow: none; color: var(--muted); }
 button.ghost:hover { background: var(--subtle); color: var(--text); }
 button.link { height: auto; border: 0; background: none; box-shadow: none; padding: 4px 6px; color: var(--muted); }
@@ -270,6 +254,10 @@ input[readonly] { background: var(--subtle); }
 }
 
 /* ---------- Page and bucket headers ---------- */
+/* The theme switch sits in .main's top-right corner (app.js). */
+.theme-toggle { position: absolute; top: 22px; right: 28px; z-index: 2; }
+.login .theme-toggle { position: fixed; top: 16px; right: 20px; }
+.bucket-title, .page-head { padding-right: 52px; }
 .bucket-head { margin-bottom: 20px; border-bottom: 1px solid var(--line); }
 .bucket-title { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
 .bucket-icon {
@@ -529,8 +517,7 @@ dl.details dd { margin: 0; min-width: 0; display: flex; align-items: center; gap
   box-shadow: var(--shadow-lg); font-size: 13.5px;
   animation: toast-in .2s var(--ease);
 }
-.toast.error { background: var(--danger); color: #fff; }
-@media (prefers-color-scheme: dark) { .toast.error { color: #1c0a0a; } }
+.toast.error { background: var(--danger); color: var(--on-danger); }
 .toast small { display: block; opacity: .7; font-family: var(--mono); font-size: 11.5px; margin-top: 2px; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } }
 

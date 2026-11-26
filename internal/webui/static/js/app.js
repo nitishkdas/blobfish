@@ -10,6 +10,9 @@ import { renderSettings, showSettings } from "./settings.js";
 import { navigate, parseHash } from "./router.js";
 import { can, isServerAdmin, state, ui } from "./state.js";
 import { renderUploadPanel, stopAllUploads } from "./uploads.js";
+import { applyTheme, themeToggle } from "./theme.js";
+
+applyTheme();
 
 function root() { return document.getElementById("app"); }
 
@@ -47,6 +50,7 @@ function renderLogin(message = "") {
 
   root().className = "";
   root().replaceChildren(h("main", { class: "login" },
+    themeToggle(),
     h("div", { class: "login-card" },
       h("img", { src: "favicon.svg", alt: "" }),
       h("h1", {}, "Sign in to BlobFish"),
@@ -193,7 +197,15 @@ function renderProfile() {
     iconButton("signOut", "Sign out", () => signOut()));
 }
 
+// renderMain is the page on the right, with the theme switch in its
+// top-right corner (it scrolls away with the page header).
 function renderMain() {
+  const main = renderPage();
+  main.prepend(themeToggle());
+  return main;
+}
+
+function renderPage() {
   const r = state.route;
   if (r.view === "keys") return renderKeysPage();
   if (r.view === "files" && can("r", r.bucket)) return renderFiles();

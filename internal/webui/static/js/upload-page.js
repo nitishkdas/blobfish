@@ -3,6 +3,9 @@
 // It can only add files; it never sees what else is stored.
 
 import { formatSize, h, icon, relativeTime } from "./dom.js";
+import { applyTheme } from "./theme.js";
+
+applyTheme();
 
 const token = location.pathname.split("/")[2] || "";
 const base = `/u/${encodeURIComponent(token)}`;
