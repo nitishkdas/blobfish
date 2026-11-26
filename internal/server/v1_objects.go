@@ -72,7 +72,11 @@ func (a *api) putObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
 	if _, ok := a.authorize(w, r, t, auth.PermWrite); !ok {
 		return
 	}
-	meta := store.Meta{ContentType: r.Header.Get("Content-Type"), SizeHint: r.ContentLength}
+	meta := store.Meta{
+		ContentType: r.Header.Get("Content-Type"), SizeHint: r.ContentLength,
+		// "If-None-Match: *": create only, never replace (RFC 9110 13.1.2).
+		NoOverwrite: strings.TrimSpace(r.Header.Get("If-None-Match")) == "*",
+	}
 	for name, vals := range r.Header {
 		if k, ok := strings.CutPrefix(name, metaHeader); ok && k != "" {
 			if meta.User == nil {
@@ -87,6 +91,10 @@ func (a *api) putObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
 		// or while streaming). Don't let net/http drain gigabytes of it to
 		// keep the connection alive.
 		w.Header().Set("Connection", "close")
+		if meta.NoOverwrite && errors.Is(err, store.ErrKeyExists) {
+			writeError(w, r, http.StatusPreconditionFailed, CodePreconditionFailed, err.Error())
+			return
+		}
 		a.fail(w, r, err)
 		return
 	}

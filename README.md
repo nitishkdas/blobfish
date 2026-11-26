@@ -59,6 +59,11 @@ curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","expiresIn":0
 # object, presigned or share-link URL to force a download):
 curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","filename":"Invoice 7.pdf"}' localhost:8080/v1/links
 
+# Let someone without a key send you files (a web page at the returned url;
+# they can only add files to that folder, never see or replace anything):
+curl -X POST -H "$H" -d '{"bucket":"invoices","folder":"from-acme","label":"Invoices for ACME","maxFiles":20,"expiresIn":604800}' \
+     localhost:8080/v1/uploadlinks
+
 # Deleted by mistake? Deletes go to the bucket's trash for 7 days:
 curl -H "$H" localhost:8080/v1/trash/invoices                      # list, newest first
 curl -X POST -H "$H" localhost:8080/v1/trash/invoices/<id>/restore  # put it back

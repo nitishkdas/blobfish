@@ -50,6 +50,9 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 			return err
 		}
 		if prev := objs.Get([]byte(key)); prev != nil {
+			if meta.NoOverwrite {
+				return fmt.Errorf("%w: %s/%s", store.ErrKeyExists, bucket, key)
+			}
 			if old, err := decodeObject(prev); err == nil {
 				guard.oldSize = old.Size
 			}
@@ -155,6 +158,9 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 		}
 		var oldSize, added int64 = 0, 1
 		if prev := objs.Get([]byte(key)); prev != nil {
+			if meta.NoOverwrite { // another upload won the race for this key
+				return fmt.Errorf("%w: %s/%s", store.ErrKeyExists, bucket, key)
+			}
 			old, err := decodeObject(prev)
 			if err != nil {
 				return err

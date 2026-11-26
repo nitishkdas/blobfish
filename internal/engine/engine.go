@@ -6,7 +6,8 @@
 //	meta.db              bbolt: "buckets", "objects/<bucket>/<key>", "blobs/<id>",
 //	                     "keys/<token hash>", "settings",
 //	                     "links/<token>", "linkidx/<bucket>\x00<key>\x00<id>" -> token,
-//	                     "trash/<bucket>/<trash id>" (deleted objects, see trash.go)
+//	                     "trash/<bucket>/<trash id>" (deleted objects, see trash.go),
+//	                     "uplinks/<token>" (upload links, see uplinks.go)
 //	objects/ab/cd/<id>   object bytes, random 32-hex-char IDs
 //	tmp/                 uploads in progress
 //
@@ -169,7 +170,7 @@ func Open(dir string, opts Options) (*Engine, error) {
 	}
 	var formatBefore int
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx, bktTrash} {
+		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx, bktTrash, bktUplinks} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}

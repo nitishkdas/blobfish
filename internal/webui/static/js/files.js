@@ -8,6 +8,7 @@ import {
 import { navigate } from "./router.js";
 import { PAGE_SIZES, bucketInfo, can, isServerAdmin, rerenderMain, state, ui } from "./state.js";
 import { pickAndUpload, wireDrop } from "./uploads.js";
+import { openUploadLinks } from "./uplinks.js";
 
 // ---------- Loading ----------
 
@@ -101,6 +102,10 @@ export function renderFiles() {
           class: "link with-icon", title: "Deleted files you can still restore",
           onclick: () => navigate({ view: "trash", bucket: r.bucket }),
         }, icon("trash"), "Trash"),
+        canWrite && h("button", {
+          class: "link", onclick: () => openUploadLinks(r.bucket, r.prefix),
+          title: "Let people without a key send files into this folder",
+        }, "Upload links"),
         canWrite && h("button", { class: "with-icon", onclick: newFolder }, icon("folderPlus"), "New folder"),
         canWrite && h("button", { class: "with-icon", onclick: () => pickAndUpload({ folder: true }) }, icon("folder"), "Upload folder"),
         canWrite && h("button", { class: "primary with-icon", onclick: () => pickAndUpload({ folder: false }) }, icon("upload"), "Upload"),

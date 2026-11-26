@@ -69,6 +69,9 @@ func (e *Engine) DeleteBucket(ctx context.Context, name string) error {
 		if err := deleteLinksWithPrefix(tx, linkIdxPrefix(name, "")); err != nil {
 			return err
 		}
+		if err := deleteBucketUploadLinks(tx, name); err != nil {
+			return err
+		}
 		return tx.Bucket(bktBuckets).Delete([]byte(name))
 	})
 	if err != nil {

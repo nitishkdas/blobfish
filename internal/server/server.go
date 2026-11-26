@@ -31,6 +31,7 @@ type Options struct {
 	Auth        *auth.Service
 	Links       store.Links
 	Trash       store.Trash
+	UploadLinks store.UploadLinks
 	Backup      store.Backuper
 	Health      store.HealthChecker
 	// Version and DataFormat are reported by GET /v1/status.
@@ -49,6 +50,7 @@ type api struct {
 	auth     *auth.Service
 	links    store.Links
 	trash    store.Trash
+	uplinks  store.UploadLinks
 	backuper store.Backuper
 	health   store.HealthChecker
 	stats    *serverStats
@@ -68,6 +70,7 @@ func New(opts Options) http.Handler {
 		auth:       opts.Auth,
 		links:      opts.Links,
 		trash:      opts.Trash,
+		uplinks:    opts.UploadLinks,
 		backuper:   opts.Backup,
 		health:     opts.Health,
 		stats:      &serverStats{started: time.Now()},
@@ -99,6 +102,12 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("DELETE /v1/trash/{bucket}", a.emptyTrash)
 	mux.HandleFunc("POST /v1/trash/{bucket}/{id}/restore", a.restoreTrash)
 	mux.HandleFunc("DELETE /v1/trash/{bucket}/{id}", a.purgeTrashItem)
+	mux.HandleFunc("POST /v1/uploadlinks", a.createUploadLink)
+	mux.HandleFunc("GET /v1/uploadlinks", a.listUploadLinks)
+	mux.HandleFunc("DELETE /v1/uploadlinks/{id}", a.deleteUploadLink)
+	mux.Handle("GET /u/{token}", webui.UploadPage())
+	mux.HandleFunc("GET /u/{token}/info", a.uploadLinkInfo)
+	mux.HandleFunc("PUT /u/{token}/{name}", a.uploadViaLink)
 	mux.HandleFunc("POST /v1/presign", a.presign)
 	mux.HandleFunc("GET /v1/keys", a.listKeys)
 	mux.HandleFunc("POST /v1/keys", a.createKey)

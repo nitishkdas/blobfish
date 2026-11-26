@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex">
+  <title>Upload files</title>
+  <link rel="icon" href="/ui/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/ui/style.css">
+  <script type="module" src="/ui/js/upload-page.js"></script>
+</head>
+<body>
+  <main class="drop-page" id="page">
+    <img src="/ui/favicon.svg" alt="">
+    <h1 id="title">Upload files</h1>
+    <p class="muted" id="limits">Loading…</p>
+    <section id="drop" class="drop-zone" hidden>
+      <p>Drop files here, or</p>
+      <label class="button primary">Choose files<input type="file" id="pick" multiple class="visually-hidden"></label>
+    </section>
+    <ul id="files" class="drop-files" aria-live="polite"></ul>
+    <p class="muted drop-foot">Files you send can't be seen, changed or deleted through this page. Sent with BlobFish.</p>
+  </main>
+  <div class="dock"><div id="toasts" role="status" aria-live="polite"></div></div>
+</body>
+</html>

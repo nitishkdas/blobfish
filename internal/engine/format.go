@@ -11,7 +11,7 @@ import (
 // FormatVersion is the on-disk format this binary reads and writes. Bump it
 // whenever meta.db or the objects/ layout changes in a way older binaries
 // would misread, and add the upgrade step to migrationSteps.
-const FormatVersion = 3
+const FormatVersion = 4
 
 // ErrFormatTooNew means the data dir was written by a newer BlobFish.
 // Opening it with this binary could misread or damage it.
@@ -36,6 +36,13 @@ func migrationSteps() map[int]migration {
 		// 3: per-bucket usage counters (for quotas). A format-2 binary
 		// would write objects without updating them.
 		2: recountUsage,
+		// 4: upload links. A format-3 binary would keep a deleted bucket's
+		// upload links, which a re-created bucket of that name would
+		// then inherit.
+		3: func(tx *bbolt.Tx) error {
+			_, err := tx.CreateBucketIfNotExists(bktUplinks)
+			return err
+		},
 	}
 }
 

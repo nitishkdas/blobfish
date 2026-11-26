@@ -50,6 +50,40 @@
       </div>
     </form>
   </dialog>
+  <dialog id="uplinks">
+    <form method="dialog" class="dialog share-dialog">
+      <h2 id="uplinks-title" class="break">Upload links</h2>
+      <p class="muted">Anyone with an upload link can add files to its folder from a simple web page, without a key. They can't see, replace or delete anything.</p>
+      <ul id="uplinks-list" class="share-links"></ul>
+      <div>
+        <h3 class="section-title">New link</h3>
+        <p class="muted" id="uplinks-folder"></p>
+      </div>
+      <div class="uplink-form">
+        <label class="field">Title shown to uploaders (optional)
+          <input id="uplinks-label" maxlength="200" autocomplete="off" placeholder="e.g. Receipts for ACME">
+        </label>
+        <label class="field">Expires
+          <select id="uplinks-ttl">
+            <option value="86400">in 1 day</option>
+            <option value="604800" selected>in 7 days</option>
+            <option value="2592000">in 30 days</option>
+            <option value="0">never</option>
+          </select>
+        </label>
+        <label class="field">Max files
+          <input id="uplinks-max-files" type="number" min="0" step="1" placeholder="no limit">
+        </label>
+        <label class="field">Max size per file (MB)
+          <input id="uplinks-max-size" type="number" min="0" step="any" placeholder="server limit">
+        </label>
+      </div>
+      <div class="row end">
+        <button value="close">Close</button>
+        <button type="button" id="uplinks-create" class="primary">Create link</button>
+      </div>
+    </form>
+  </dialog>
   <!-- One dialog for confirm / choice / prompt; filled by ask() in js/dom.js. -->
   <dialog id="ask">
     <form method="dialog" class="dialog">

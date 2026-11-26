@@ -61,6 +61,45 @@ type Links interface {
 	DeleteLink(ctx context.Context, id string) error
 }
 
+// UploadLinks stores upload links: URLs that let someone without a key
+// add files to one folder of a bucket, never read or replace anything.
+type UploadLinks interface {
+	CreateUploadLink(ctx context.Context, rec UploadLinkRecord) error
+	// UploadLinkByToken and UploadLinkByID return ErrNoSuchLink when
+	// nothing matches.
+	UploadLinkByToken(ctx context.Context, token string) (UploadLinkRecord, error)
+	UploadLinkByID(ctx context.Context, id string) (UploadLinkRecord, error)
+	// ListUploadLinks returns a bucket's upload links, oldest first.
+	ListUploadLinks(ctx context.Context, bucket string) ([]UploadLinkRecord, error)
+	DeleteUploadLink(ctx context.Context, id string) error
+	// ClaimUploadSlot counts one upload against the link's file limit,
+	// failing with ErrUploadLimitReached when none are left. Call
+	// ReleaseUploadSlot if the upload then fails, so the slot is not lost.
+	ClaimUploadSlot(ctx context.Context, token string) (UploadLinkRecord, error)
+	ReleaseUploadSlot(ctx context.Context, token string) error
+}
+
+// UploadLinkRecord is a stored upload link.
+type UploadLinkRecord struct {
+	ID     string `json:"id"`
+	Token  string `json:"token"`
+	Bucket string `json:"bucket"`
+	// Prefix is the folder files land in: "" or ending in "/".
+	Prefix string `json:"prefix"`
+	// Label is shown to the uploader, e.g. "Receipts for ACME".
+	Label string `json:"label,omitempty"`
+	// Expires is zero for a link that never expires.
+	Expires time.Time `json:"expires,omitzero"`
+	// MaxFiles caps uploads through the link (0 = no cap); Uploads counts
+	// them. MaxFileSize caps each file in bytes (0 = the server's limit).
+	MaxFiles      int       `json:"maxFiles,omitempty"`
+	Uploads       int       `json:"uploads"`
+	MaxFileSize   int64     `json:"maxFileSize,omitempty"`
+	Created       time.Time `json:"created"`
+	CreatedBy     string    `json:"createdBy"`
+	CreatedByName string    `json:"createdByName"`
+}
+
 // Trash keeps deleted objects for a while so they can be restored. While
 // an object is in trash, its share links don't work; restoring it brings
 // them back.
@@ -175,6 +214,10 @@ type Meta struct {
 	// an upload that can't fit is refused before it streams. <= 0: unknown.
 	// Not stored.
 	SizeHint int64
+	// NoOverwrite makes Put fail with ErrKeyExists instead of replacing an
+	// existing object; decided in the commit transaction, so it holds
+	// against concurrent uploads. Not stored.
+	NoOverwrite bool
 }
 
 // ObjectInfo describes a stored object.
@@ -263,4 +306,6 @@ var (
 	// ErrQuotaExceeded: the write would take the bucket over its quota.
 	ErrQuotaExceeded = errors.New("bucket quota exceeded")
 	ErrInvalidQuota  = errors.New("invalid quota")
+	// ErrUploadLimitReached: an upload link has taken all the files it may.
+	ErrUploadLimitReached = errors.New("upload link has no uploads left")
 )

@@ -38,6 +38,29 @@ func Favicon() http.Handler {
 	})
 }
 
+// UploadPage serves the page behind an upload link (/u/<token>): a file
+// picker that sends files to PUT /u/<token>/<name>. The page itself knows
+// nothing; it asks /u/<token>/info what the link allows.
+func UploadPage() http.Handler {
+	page, err := files.ReadFile("static/upload.html")
+	if err != nil {
+		panic(err) // embedded at build time
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", "text/html; charset=utf-8")
+		h.Set("Content-Security-Policy", csp)
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		// The token is in the URL: keep it out of Referer headers and
+		// search engines.
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Robots-Tag", "noindex")
+		h.Set("Cache-Control", "no-store")
+		w.Write(page)
+	})
+}
+
 // Handler serves the UI under Prefix.
 func Handler() http.Handler {
 	static, err := fs.Sub(files, "static")
