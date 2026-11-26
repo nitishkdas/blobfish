@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
+	"github.com/nitishkdas/blobfish/internal/config"
 	"github.com/nitishkdas/blobfish/internal/engine"
 	"github.com/nitishkdas/blobfish/internal/store"
 )
@@ -276,7 +277,6 @@ func TestVerifyCommand(t *testing.T) {
 }
 
 func TestResetPasswordCommand(t *testing.T) {
-	auth.UseCheapPasswordHashForTests()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	env := func(k string) string { return map[string]string{"BLOBFISH_DATA_DIR": dataDir}[k] }
 	ctx := context.Background()
@@ -284,7 +284,7 @@ func TestResetPasswordCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := auth.NewService(eng, eng.PresignSecret()).UseUsers(eng)
+	svc := auth.NewService(eng, eng.PresignSecret()).UseUsers(eng).UseCheapPasswordHashForTests()
 	if _, err := svc.CreateUser(ctx, "maya", "forgotten password", []string{"*:admin"}); err != nil {
 		t.Fatal(err)
 	}
@@ -324,5 +324,28 @@ func TestResetPasswordCommand(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer "+old)
 	if _, err := svc.Authenticate(r, auth.Target{}); err == nil {
 		t.Error("old session survived the reset")
+	}
+}
+
+func TestExposedWithoutTLS(t *testing.T) {
+	tcp := func(s string) net.Addr { a, _ := net.ResolveTCPAddr("tcp", s); return a }
+	for _, tc := range []struct {
+		addr    string
+		proxies []string
+		public  string
+		want    bool
+	}{
+		{"127.0.0.1:8080", nil, "", false},
+		{"[::1]:8080", nil, "", false},
+		{"0.0.0.0:8080", nil, "", true},
+		{"0.0.0.0:8080", []string{"172.21.0.0/16"}, "", false},
+		{"0.0.0.0:8080", nil, "https://files.example.com", false},
+		{"0.0.0.0:8080", nil, "http://files.example.com", true},
+	} {
+		cfg := config.Default()
+		cfg.TrustedProxies, cfg.PublicURL = tc.proxies, tc.public
+		if got := exposedWithoutTLS(tcp(tc.addr), cfg); got != tc.want {
+			t.Errorf("%s %v %q: %v, want %v", tc.addr, tc.proxies, tc.public, got, tc.want)
+		}
 	}
 }

@@ -127,3 +127,20 @@ func TestLoadMissingFile(t *testing.T) {
 		t.Fatalf("Load() error = %v, want fs.ErrNotExist", err)
 	}
 }
+
+func TestOperatorNotice(t *testing.T) {
+	env := map[string]string{"BLOBFISH_OPERATOR_NAME": "Acme Ltd", "BLOBFISH_PRIVACY_URL": "https://acme.example/privacy"}
+	cfg, err := Load("", func(k string) string { return env[k] })
+	if err != nil || cfg.OperatorName != "Acme Ltd" || cfg.PrivacyURL != "https://acme.example/privacy" {
+		t.Fatalf("cfg = %+v, %v", cfg, err)
+	}
+	for _, bad := range []map[string]string{
+		{"BLOBFISH_PRIVACY_URL": "javascript:alert(1)"},
+		{"BLOBFISH_PRIVACY_URL": "acme.example/privacy"},
+		{"BLOBFISH_OPERATOR_NAME": "Acme\nLtd"},
+	} {
+		if _, err := Load("", func(k string) string { return bad[k] }); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+}

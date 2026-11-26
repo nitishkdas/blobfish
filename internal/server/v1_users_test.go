@@ -6,11 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/nitishkdas/blobfish/internal/auth"
 )
-
-func init() { auth.UseCheapPasswordHashForTests() }
 
 func (a *testAPI) login(name, pw string) string {
 	a.t.Helper()

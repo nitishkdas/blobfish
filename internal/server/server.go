@@ -44,6 +44,9 @@ type Options struct {
 	// MinQuotaBytes is the smallest bucket quota PATCH accepts (0 = no
 	// quota is always allowed). Zero means no minimum (tests).
 	MinQuotaBytes int64
+	// OperatorName and PrivacyURL tell upload-link visitors who receives
+	// their files (both optional).
+	OperatorName, PrivacyURL string
 }
 
 // api holds the /v1 handlers' dependencies.
@@ -58,13 +61,16 @@ type api struct {
 	webhooks store.Webhooks
 	backuper store.Backuper
 	health   store.HealthChecker
-	stats    *serverStats
-	version  string
+	// healthCache rate-limits real health checks (see healthReport).
+	healthCache healthCache
+	stats       *serverStats
+	version     string
 	// dataFormat is the on-disk format version, for /v1/status.
 	dataFormat int
 	publicURL  string
 	maxObject  int64
 	minQuota   int64
+	operator   operatorJSON
 }
 
 // New returns the root handler with all routes and middleware applied.
@@ -86,6 +92,7 @@ func New(opts Options) http.Handler {
 		publicURL:  strings.TrimSuffix(opts.PublicURL, "/"),
 		maxObject:  opts.MaxObjectSize,
 		minQuota:   opts.MinQuotaBytes,
+		operator:   operatorJSON{Name: opts.OperatorName, PrivacyURL: opts.PrivacyURL},
 	}
 
 	mux := http.NewServeMux()
@@ -154,6 +161,7 @@ func New(opts Options) http.Handler {
 	return chain(root,
 		requestIDMiddleware,
 		clientIPMiddleware(opts.TrustedProxies),
+		hstsMiddleware,
 		logMiddleware(opts.Logger, a.stats),
 		recoverMiddleware(opts.Logger),
 		maxBodyMiddleware(opts.MaxObjectSize),

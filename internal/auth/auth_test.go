@@ -39,17 +39,33 @@ func (m *memKeys) KeyByHash(_ context.Context, h string) (store.KeyRecord, error
 	return store.KeyRecord{}, store.ErrNoSuchAPIKey
 }
 
+func (m *memKeys) KeyByID(_ context.Context, id string) (store.KeyRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.recs {
+		if r.ID == id {
+			return r, nil
+		}
+	}
+	return store.KeyRecord{}, store.ErrNoSuchAPIKey
+}
+
 func (m *memKeys) ListKeys(context.Context) ([]store.KeyRecord, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.recs), nil
 }
 
-func (m *memKeys) DeleteKey(_ context.Context, id string) error {
+func (m *memKeys) DeleteKey(_ context.Context, id string, allow func(store.KeyRecord, []store.KeyRecord) error) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, r := range m.recs {
 		if r.ID == id {
+			if allow != nil {
+				if err := allow(r, slices.Clone(m.recs)); err != nil {
+					return err
+				}
+			}
 			m.recs = slices.Delete(m.recs, i, i+1)
 			return nil
 		}

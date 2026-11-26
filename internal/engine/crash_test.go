@@ -76,6 +76,10 @@ func TestCrashPoints(t *testing.T) {
 			if !fired || !errors.Is(err, errSimulatedCrash) {
 				t.Fatalf("crash point %q did not fire (err=%v)", tt.point, err)
 			}
+			// Callers must learn that the write may have happened.
+			if uncertain := errors.Is(err, store.ErrCommitUncertain); uncertain != (tt.point == "put:commit-uncertain") {
+				t.Errorf("ErrCommitUncertain = %v for %s (err=%v)", uncertain, tt.point, err)
+			}
 			e.Close() // the "process" is gone; only the disk remains
 
 			// Restart. Open runs the janitor.

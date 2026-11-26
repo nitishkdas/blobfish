@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -27,13 +28,20 @@ type linkJSON struct {
 	CreatedByName string     `json:"createdByName"`
 	// Filename is the name the file is served and saved under.
 	Filename string `json:"filename"`
+	// Active is false when the link's creator was deleted or can no
+	// longer read the file: the link then answers 404 until access returns.
+	Active bool `json:"active"`
 }
 
-func (a *api) toLinkJSON(r *http.Request, l store.LinkRecord) linkJSON {
+func (a *api) toLinkJSON(r *http.Request, l store.LinkRecord) (linkJSON, error) {
+	active, err := a.auth.CreatorCan(r.Context(), l.CreatedBy, auth.PermRead, l.Bucket, l.Key)
+	if err != nil {
+		return linkJSON{}, err
+	}
 	name := linkFilename(l)
 	out := linkJSON{
 		ID: l.ID, Bucket: l.Bucket, Key: l.Key, Created: l.Created,
-		CreatedBy: l.CreatedBy, CreatedByName: l.CreatedByName, Filename: name,
+		CreatedBy: l.CreatedBy, CreatedByName: l.CreatedByName, Filename: name, Active: active,
 		// The trailing file name is cosmetic: it makes links readable and
 		// gives downloads a sensible default name.
 		URL: a.baseURL(r) + "/s/" + l.Token + "/" + url.PathEscape(name),
@@ -42,7 +50,7 @@ func (a *api) toLinkJSON(r *http.Request, l store.LinkRecord) linkJSON {
 		exp := l.Expires
 		out.Expires = &exp
 	}
-	return out
+	return out, nil
 }
 
 // createLink makes a share link to one object. Anyone who can read the
@@ -106,7 +114,12 @@ func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, a.toLinkJSON(r, rec))
+	out, err := a.toLinkJSON(r, rec)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
 }
 
 // listLinks lists links for one object or one bucket (read access needed),
@@ -129,7 +142,12 @@ func (a *api) listLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]linkJSON, 0, len(recs))
 	for _, l := range recs {
-		out = append(out, a.toLinkJSON(r, l))
+		j, err := a.toLinkJSON(r, l)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		out = append(out, j)
 	}
 	writeJSON(w, http.StatusOK, map[string][]linkJSON{"links": out})
 }
@@ -168,11 +186,17 @@ func (a *api) serveLink(w http.ResponseWriter, r *http.Request) {
 	if a.cors(w, r, rec.Bucket) {
 		return
 	}
+	setActor(r, "link:"+rec.ID)
 	if !rec.Expires.IsZero() && time.Now().After(rec.Expires) {
 		a.fail(w, r, fmt.Errorf("%w on %s", errLinkExpired, rec.Expires.Format(time.RFC3339)))
 		return
 	}
-	setActor(r, "link:"+rec.ID)
+	// A link acts for whoever made it: it works only while they could
+	// still read the file themselves. Otherwise it looks revoked.
+	if ok, err := a.auth.CreatorCan(r.Context(), rec.CreatedBy, auth.PermRead, rec.Bucket, rec.Key); err != nil || !ok {
+		a.fail(w, r, cmp.Or(err, fmt.Errorf("%w: its creator no longer has access", store.ErrNoSuchLink)))
+		return
+	}
 	disposition, err := contentDisposition(r, linkFilename(rec))
 	if err != nil {
 		a.fail(w, r, err)

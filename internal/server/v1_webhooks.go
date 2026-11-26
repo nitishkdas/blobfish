@@ -132,7 +132,7 @@ func (a *api) createWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.log.InfoContext(r.Context(), "webhook created",
-		"request_id", RequestID(r.Context()), "bucket", rec.Bucket, "webhook", rec.ID, "url", rec.URL)
+		"request_id", RequestID(r.Context()), "bucket", rec.Bucket, "webhook", rec.ID, "host", webhookHost(rec.URL))
 	out := toWebhookJSON(rec)
 	out.Secret = rec.Secret
 	writeJSON(w, http.StatusCreated, out)
@@ -200,4 +200,15 @@ func (a *api) testWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "queued"})
+}
+
+// webhookHost is what the log may say about a webhook's address: its
+// scheme and host. The path and query often carry a secret (Slack, Discord
+// and many CI hooks put a token there).
+func webhookHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "(unparseable)"
+	}
+	return u.Scheme + "://" + u.Host
 }

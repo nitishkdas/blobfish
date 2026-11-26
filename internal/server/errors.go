@@ -59,6 +59,7 @@ const (
 	CodeInvalidPassword    = "InvalidPassword"
 	CodeInvalidUserName    = "InvalidUserName"
 	CodeNotSession         = "NotSignedInAsUser"
+	CodeCommitUncertain    = "CommitUncertain"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This
@@ -68,6 +69,9 @@ var errorMapping = []struct {
 	status int
 	code   string
 }{
+	// First: it wraps the underlying cause (maybe ENOSPC), but what the
+	// client must know is that the write may have happened anyway.
+	{store.ErrCommitUncertain, http.StatusInternalServerError, CodeCommitUncertain},
 	{store.ErrNoSuchBucket, http.StatusNotFound, CodeNoSuchBucket},
 	{store.ErrNoSuchKey, http.StatusNotFound, CodeNoSuchKey},
 	{store.ErrBucketExists, http.StatusConflict, CodeBucketExists},
@@ -141,7 +145,10 @@ func classify(err error) (status int, code, message string) {
 	for _, m := range errorMapping {
 		if errors.Is(err, m.err) {
 			msg := err.Error()
-			if m.status >= 500 && m.code == CodeInternalError {
+			switch {
+			case m.code == CodeCommitUncertain: // the detail is internal
+				msg = store.ErrCommitUncertain.Error() + "; check with HEAD before retrying"
+			case m.status >= 500 && m.code == CodeInternalError:
 				msg = "internal server error"
 			}
 			return m.status, m.code, msg

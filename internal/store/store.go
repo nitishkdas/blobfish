@@ -263,10 +263,15 @@ type Keys interface {
 	CreateKey(ctx context.Context, rec KeyRecord) error
 	// KeyByHash returns ErrNoSuchAPIKey if no key has this token hash.
 	KeyByHash(ctx context.Context, hash string) (KeyRecord, error)
+	// KeyByID returns ErrNoSuchAPIKey if no key has this id.
+	KeyByID(ctx context.Context, id string) (KeyRecord, error)
 	// ListKeys returns all keys, oldest first.
 	ListKeys(ctx context.Context) ([]KeyRecord, error)
-	// DeleteKey returns ErrNoSuchAPIKey if id is unknown.
-	DeleteKey(ctx context.Context, id string) error
+	// DeleteKey deletes the key with this id, or returns ErrNoSuchAPIKey.
+	// If allow is not nil it runs in the same transaction, with the key
+	// and every key that exists, and an error from it cancels the delete:
+	// a check like "not the last admin key" can't race another delete.
+	DeleteKey(ctx context.Context, id string, allow func(target KeyRecord, all []KeyRecord) error) error
 }
 
 // Users stores people who sign in with a name and password, and their
@@ -286,8 +291,10 @@ type Users interface {
 	DeleteUser(ctx context.Context, name string) error
 
 	// CreateSession stores a session and records the sign-in time on its
-	// user, in one transaction. ErrNoSuchUser if the user is gone.
-	CreateSession(ctx context.Context, rec SessionRecord) error
+	// user, in one transaction. ErrNoSuchUser if the user is gone;
+	// ErrUserChanged if the user's password hash is no longer
+	// passwordHash (the one the sign-in checked).
+	CreateSession(ctx context.Context, rec SessionRecord, passwordHash string) error
 	// SessionByHash returns the session and its user, or ErrNoSuchSession.
 	SessionByHash(ctx context.Context, hash string) (SessionRecord, UserRecord, error)
 	// TouchSession sets a session's LastSeen (no error if it is gone).
@@ -438,6 +445,13 @@ var (
 	ErrNoSuchUser    = errors.New("no such user")
 	ErrUserExists    = errors.New("user already exists")
 	ErrNoSuchSession = errors.New("no such session")
+	// ErrUserChanged: the user's password changed (or the user was made
+	// again) while a sign-in was checking the old one.
+	ErrUserChanged = errors.New("user changed during sign-in")
+	// ErrCommitUncertain: storing failed in a way that leaves it unknown
+	// whether the write took effect (the metadata commit reported an I/O
+	// error). Callers must not assume nothing was stored.
+	ErrCommitUncertain = errors.New("write may or may not have been stored")
 	// ErrUploadLimitReached: an upload link has taken all the files it may.
 	ErrUploadLimitReached = errors.New("upload link has no uploads left")
 	ErrNoSuchWebhook      = errors.New("webhook not found")

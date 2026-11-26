@@ -81,3 +81,25 @@ func TestPresignSchemeBehindProxy(t *testing.T) {
 		}
 	}
 }
+
+func TestHSTSOnlyOverHTTPS(t *testing.T) {
+	trusted, _ := ParseTrustedProxies([]string{"10.0.0.1"})
+	h := New(Options{Logger: slog.New(slog.DiscardHandler), TrustedProxies: trusted})
+	for _, tc := range []struct {
+		peer, proto string
+		want        bool
+	}{
+		{"10.0.0.1:1", "https", true},  // trusted proxy terminated TLS
+		{"10.0.0.1:1", "http", false},  // proxy says plain http
+		{"10.9.9.9:1", "https", false}, // untrusted peer can't claim https
+	} {
+		r := httptest.NewRequest("GET", "/healthz", nil)
+		r.RemoteAddr = tc.peer
+		r.Header.Set("X-Forwarded-Proto", tc.proto)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, r)
+		if got := rr.Header().Get("Strict-Transport-Security") != ""; got != tc.want {
+			t.Errorf("%s %s: HSTS sent = %v", tc.peer, tc.proto, got)
+		}
+	}
+}

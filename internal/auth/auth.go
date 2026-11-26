@@ -16,10 +16,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nitishkdas/blobfish/internal/store"
@@ -156,14 +159,31 @@ type Service struct {
 	now      func() time.Time
 	throttle throttle
 	hashing  chan struct{} // limits concurrent password hashing
+	log      *slog.Logger
+
+	passwordCost int // PBKDF2 iterations for new hashes
+	dummyMu      sync.Mutex
+	dummy        string // see dummyHash
+	dummyCost    int
+
+	lastWriteWarn atomic.Int64 // unix ns; see logSessionWriteError
 }
 
 var _ Authenticator = (*Service)(nil)
 
 // NewService returns a Service that stores keys in keys and signs URLs with
-// secret.
+// secret. It logs to slog.Default until WithLogger is called.
 func NewService(keys store.Keys, secret []byte) *Service {
-	return &Service{keys: keys, secret: secret, now: time.Now, hashing: make(chan struct{}, 2)}
+	return &Service{
+		keys: keys, secret: secret, now: time.Now, hashing: make(chan struct{}, 2),
+		log: slog.Default(), passwordCost: defaultPasswordCost,
+	}
+}
+
+// WithLogger sets where the Service reports problems it works around.
+func (s *Service) WithLogger(l *slog.Logger) *Service {
+	s.log = l
+	return s
 }
 
 // Authenticate implements Authenticator. A request carries either an
@@ -182,6 +202,54 @@ func (s *Service) Authenticate(r *http.Request, t Target) (Principal, error) {
 		return s.authenticatePresigned(r.Method, t, q.Get("exp"), q.Get("sig"))
 	}
 	return Principal{}, ErrUnauthenticated
+}
+
+// CreatorCan reports whether the key or user that made something (a link's
+// CreatedBy, which is the creator's Principal.KeyID) still exists and holds
+// perm on bucket now. Links act for their creator, so they stop working
+// when the creator is deleted or loses access, and work again if access
+// comes back. A user deleted and made again under the same name is
+// someone else: their KeyID differs.
+func (s *Service) CreatorCan(ctx context.Context, createdBy string, perm Perm, bucket, key string) (bool, error) {
+	var raw []string
+	if rest, ok := strings.CutPrefix(createdBy, "user:"); ok {
+		if s.users == nil {
+			return false, nil
+		}
+		name, _, _ := strings.Cut(rest, "@")
+		u, err := s.users.GetUser(ctx, name)
+		if errors.Is(err, store.ErrNoSuchUser) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if userKeyID(u) != createdBy {
+			return false, nil
+		}
+		raw = u.Scopes
+	} else {
+		if createdBy == "" {
+			return false, nil
+		}
+		k, err := s.keys.KeyByID(ctx, createdBy)
+		if errors.Is(err, store.ErrNoSuchAPIKey) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		raw = k.Scopes
+	}
+	var p Principal
+	for _, r := range raw {
+		sc, err := ParseScope(r)
+		if err != nil {
+			return false, fmt.Errorf("stored scopes of %s: %w", createdBy, err)
+		}
+		p.Scopes = append(p.Scopes, sc)
+	}
+	return p.Can(perm, bucket, key), nil
 }
 
 func (s *Service) authenticateToken(ctx context.Context, token string) (Principal, error) {
@@ -312,25 +380,24 @@ func (s *Service) ListKeys(ctx context.Context) ([]store.KeyRecord, error) {
 }
 
 // DeleteKey deletes a key, refusing to remove the last "*:admin" key so the
-// server cannot be locked out through the API.
+// server cannot be locked out through the API. The check runs in the same
+// transaction as the delete, so two deletes at once can't both pass it.
 func (s *Service) DeleteKey(ctx context.Context, id string) error {
-	keys, err := s.keys.ListKeys(ctx)
-	if err != nil {
-		return err
-	}
-	admins, targetIsAdmin := 0, false
-	for _, k := range keys {
-		if isGlobalAdmin(k) {
-			admins++
-			if k.ID == id {
-				targetIsAdmin = true
+	return s.keys.DeleteKey(ctx, id, func(target store.KeyRecord, all []store.KeyRecord) error {
+		if !isGlobalAdmin(target) {
+			return nil
+		}
+		admins := 0
+		for _, k := range all {
+			if isGlobalAdmin(k) {
+				admins++
 			}
 		}
-	}
-	if targetIsAdmin && admins == 1 {
-		return ErrLastAdminKey
-	}
-	return s.keys.DeleteKey(ctx, id)
+		if admins <= 1 {
+			return ErrLastAdminKey
+		}
+		return nil
+	})
 }
 
 // EnsureAdminKey creates a "*:admin" key if no keys exist at all, returning

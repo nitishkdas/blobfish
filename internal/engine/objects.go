@@ -201,8 +201,9 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 		// let the janitor delete it only if nothing references it.
 		if refused != nil {
 			os.Remove(final)
+			return store.ObjectInfo{}, fmt.Errorf("commit %s/%s: %w", bucket, key, err)
 		}
-		return store.ObjectInfo{}, fmt.Errorf("commit %s/%s: %w", bucket, key, err)
+		return store.ObjectInfo{}, fmt.Errorf("commit %s/%s: %w: %w", bucket, key, store.ErrCommitUncertain, err)
 	}
 	if queued {
 		e.signalEvents()

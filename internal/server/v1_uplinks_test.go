@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,18 +66,14 @@ func TestUploadLinkAPI(t *testing.T) {
 
 	t.Run("uploads add, never replace", func(t *testing.T) {
 		a.must(http.StatusOK, "PUT", "/v1/b/inbox/from-acme/r.pdf", writer, strings.NewReader("mine"))
-		var res struct {
-			Name string
-			Size int64
-		}
-		json.Unmarshal(a.must(http.StatusCreated, "PUT", p+"/r.pdf", "", strings.NewReader("theirs"), "Content-Type", "application/pdf").Body.Bytes(), &res)
-		if res.Name != "r (2).pdf" || res.Size != 6 {
-			t.Errorf("upload result %+v", res)
+		rr := a.must(http.StatusCreated, "PUT", p+"/r.pdf", "", strings.NewReader("theirs"), "Content-Type", "application/pdf")
+		if rr.Body.String() != `{"size":6}`+"\n" {
+			t.Errorf("upload result %s (must not reveal the stored name)", rr.Body)
 		}
 		if got := a.must(http.StatusOK, "GET", "/v1/b/inbox/from-acme/r.pdf", writer, nil).Body.String(); got != "mine" {
 			t.Errorf("existing file replaced: %q", got)
 		}
-		rr := a.must(http.StatusOK, "HEAD", "/v1/b/inbox/from-acme/r%20(2).pdf", writer, nil)
+		rr = a.must(http.StatusOK, "HEAD", "/v1/b/inbox/from-acme/r%20(2).pdf", writer, nil)
 		if rr.Header().Get("Content-Type") != "application/pdf" {
 			t.Errorf("content type %q", rr.Header().Get("Content-Type"))
 		}
@@ -145,11 +143,21 @@ func TestUploadLinkFreeNames(t *testing.T) {
 		{"new.txt", "new (2).txt"},
 	}
 	for _, tt := range tests {
-		var res struct{ Name string }
-		json.Unmarshal(a.must(http.StatusCreated, "PUT", p+"/"+url.PathEscape(tt.name), "", strings.NewReader("2")).Body.Bytes(), &res)
-		if res.Name != tt.want {
-			t.Errorf("%q saved as %q, want %q", tt.name, res.Name, tt.want)
+		a.must(http.StatusCreated, "PUT", p+"/"+url.PathEscape(tt.name), "", strings.NewReader("2"))
+		if got := a.must(http.StatusOK, "GET", "/v1/b/names/"+url.PathEscape(tt.want), a.admin, nil).Body.String(); got != "2" {
+			t.Errorf("%q not saved as %q (got %q)", tt.name, tt.want, got)
 		}
+	}
+	// Every numbered name taken: still stored, under a random suffix.
+	for n := 2; n <= maxNameTries; n++ {
+		a.must(http.StatusOK, "PUT", "/v1/b/names/"+url.PathEscape(fmt.Sprintf("full (%d).txt", n)), a.admin, strings.NewReader("1"))
+	}
+	a.must(http.StatusOK, "PUT", "/v1/b/names/full.txt", a.admin, strings.NewReader("1"))
+	a.must(http.StatusCreated, "PUT", p+"/full.txt", "", strings.NewReader("new"))
+	var list struct{ Objects []struct{ Key string } }
+	json.Unmarshal(a.must(http.StatusOK, "GET", "/v1/b/names?prefix=full%20(&limit=1000", a.admin, nil).Body.Bytes(), &list)
+	if len(list.Objects) != maxNameTries {
+		t.Errorf("%d objects named full (…), want %d", len(list.Objects), maxNameTries)
 	}
 }
 
@@ -164,4 +172,22 @@ func TestPutIfNoneMatch(t *testing.T) {
 		t.Errorf("replaced: %q", got)
 	}
 	a.must(http.StatusOK, "PUT", "/v1/b/inm-b/k", a.admin, strings.NewReader("v3")) // without the header: replaces
+}
+
+func TestUploadLinkShowsOperator(t *testing.T) {
+	a := newTestAPI(t)
+	a.must(http.StatusCreated, "PUT", "/v1/buckets/inbox", a.admin, nil)
+	p := uploadPath(t, createUploadLinkJSON(t, a, a.admin, map[string]any{"bucket": "inbox"}, http.StatusCreated))
+	if body := a.must(http.StatusOK, "GET", p+"/info", "", nil).Body.String(); strings.Contains(body, "operator") {
+		t.Errorf("operator shown though not configured: %s", body)
+	}
+	a.h = New(Options{
+		Logger: slog.New(slog.DiscardHandler), MaxObjectSize: 1 << 20,
+		Store: a.eng, Buckets: a.eng, Auth: a.auth, UploadLinks: a.eng,
+		OperatorName: "Acme Ltd", PrivacyURL: "https://acme.example/privacy",
+	})
+	body := a.must(http.StatusOK, "GET", p+"/info", "", nil).Body.String()
+	if !strings.Contains(body, `"operator":{"name":"Acme Ltd","privacyUrl":"https://acme.example/privacy"}`) {
+		t.Errorf("info = %s", body)
+	}
 }

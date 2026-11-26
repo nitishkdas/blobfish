@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
@@ -65,6 +67,37 @@ func TestHealthz(t *testing.T) {
 				t.Error("failure details were not logged for the operator")
 			}
 		})
+	}
+}
+
+// countingHealth counts how often a real check runs.
+type countingHealth struct{ n *atomic.Int64 }
+
+func (c countingHealth) Health(context.Context) store.HealthReport {
+	c.n.Add(1)
+	return store.HealthReport{FreeBytes: 1 << 30}
+}
+
+// Each check writes and fsyncs a file; a burst of unauthenticated requests
+// must not turn into a burst of disk writes.
+func TestHealthzIsRateLimited(t *testing.T) {
+	var n atomic.Int64
+	a := &testAPI{t: t, h: New(Options{Logger: slog.New(slog.DiscardHandler), Health: countingHealth{&n}})}
+	var wg sync.WaitGroup
+	var bad atomic.Int64
+	for range 50 {
+		wg.Go(func() {
+			if a.do("GET", "/healthz", "", nil).Code != http.StatusOK {
+				bad.Add(1)
+			}
+		})
+	}
+	wg.Wait()
+	if bad.Load() > 0 {
+		t.Errorf("%d health requests failed", bad.Load())
+	}
+	if got := n.Load(); got != 1 {
+		t.Errorf("%d checks ran for 50 requests, want 1", got)
 	}
 }
 

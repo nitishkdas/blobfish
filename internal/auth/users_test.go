@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -14,8 +15,6 @@ import (
 	"github.com/nitishkdas/blobfish/internal/store"
 )
 
-func init() { pbkdf2Iterations = 1000 } // keep tests fast; the format is the same
-
 // newUserService returns a Service backed by a real engine, with a fake clock.
 func newUserService(t *testing.T) (*Service, *time.Time) {
 	t.Helper()
@@ -25,7 +24,7 @@ func newUserService(t *testing.T) (*Service, *time.Time) {
 	}
 	t.Cleanup(func() { eng.Close() })
 	clock := time.Date(2026, 11, 26, 9, 0, 0, 0, time.UTC)
-	s := NewService(eng, eng.PresignSecret()).UseUsers(eng)
+	s := NewService(eng, eng.PresignSecret()).UseUsers(eng).UseCheapPasswordHashForTests()
 	s.now = func() time.Time { return clock }
 	return s, &clock
 }
@@ -38,7 +37,7 @@ func authAs(t *testing.T, s *Service, token string) (Principal, error) {
 }
 
 func TestPasswordHash(t *testing.T) {
-	h, err := hashPassword("correct horse battery")
+	h, err := hashPassword("correct horse battery", cheapPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,15 +47,12 @@ func TestPasswordHash(t *testing.T) {
 	if !passwordMatches(h, "correct horse battery") || passwordMatches(h, "correct horse batterY") {
 		t.Error("password check is wrong")
 	}
-	h2, _ := hashPassword("correct horse battery")
+	h2, _ := hashPassword("correct horse battery", cheapPasswordCost)
 	if h == h2 {
 		t.Error("same hash twice: salt missing")
 	}
 	// A hash made with another iteration count still verifies.
-	old := pbkdf2Iterations
-	pbkdf2Iterations = 2000
-	h3, _ := hashPassword("pw-made-with-2000")
-	pbkdf2Iterations = old
+	h3, _ := hashPassword("pw-made-with-2000", 2000)
 	if !passwordMatches(h3, "pw-made-with-2000") {
 		t.Error("hash with a different iteration count no longer verifies")
 	}
@@ -294,19 +290,165 @@ func TestThrottleTableStaysSmall(t *testing.T) {
 		s.Login(ctx, long+fmt.Sprint(i), "pw", fmt.Sprintf("10.9.0.%d", i))
 	}
 	s.throttle.mu.Lock()
-	for k := range s.throttle.fails {
-		if len(k) > 200 {
-			t.Errorf("throttle key of %d bytes stored", len(k))
+	for _, m := range []map[string]*failCount{s.throttle.pinned, s.throttle.loose} {
+		for k := range m {
+			if len(k) > 200 {
+				t.Errorf("throttle key of %d bytes stored", len(k))
+			}
 		}
 	}
 	s.throttle.mu.Unlock()
-	// A flood of fresh keys within one window stays under the cap.
+	// A flood of fresh networks within one window stays under the cap.
 	now := s.now()
-	for i := range 3 * maxThrottleEntries {
-		s.throttle.fail(fmt.Sprintf("net:k%d", i), now)
+	for i := range 3 * maxLooseEntries {
+		s.throttle.begin(now, limit{key: fmt.Sprintf("net:k%d", i), max: maxFailsPerNet})
 	}
-	if n := len(s.throttle.fails); n > maxThrottleEntries {
-		t.Errorf("throttle table grew to %d entries, cap %d", n, maxThrottleEntries)
+	if n := len(s.throttle.loose); n > maxLooseEntries {
+		t.Errorf("throttle table grew to %d entries, cap %d", n, maxLooseEntries)
+	}
+}
+
+// Guesses sent all at once are counted before they are hashed, so a burst
+// can't slip past the limit while it waits for a hashing slot.
+func TestThrottleHoldsUnderParallelGuesses(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newUserService(t)
+	if _, err := s.CreateUser(ctx, "dave", "daves password", []string{"*:r"}); err != nil {
+		t.Fatal(err)
+	}
+	for range cap(s.hashing) {
+		s.hashing <- struct{}{} // hold every slot, so the whole burst queues
+	}
+	const burst = 60
+	errs := make(chan error, burst)
+	var wg sync.WaitGroup
+	for i := range burst {
+		wg.Go(func() {
+			_, _, _, err := s.Login(ctx, "dave", fmt.Sprintf("guess %d!!!", i), "198.51.100.7")
+			errs <- err
+		})
+	}
+	// Every request has either been refused or is waiting for a slot.
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		s.throttle.mu.Lock()
+		f := s.throttle.loose["net:198.51.100.7"]
+		counted := 0
+		if f != nil {
+			counted = f.n
+		}
+		s.throttle.mu.Unlock()
+		if counted == maxFailsPerUserNet || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond) // let the refused ones return
+	for range cap(s.hashing) {
+		<-s.hashing
+	}
+	wg.Wait()
+	close(errs)
+	checked := 0
+	for err := range errs {
+		if errors.Is(err, ErrBadCredentials) {
+			checked++
+		} else if !errors.Is(err, ErrTooManyAttempts) {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+	if checked != maxFailsPerUserNet {
+		t.Errorf("%d of %d parallel guesses were checked, limit %d", checked, burst, maxFailsPerUserNet)
+	}
+}
+
+// Filling the table from many networks must not wipe a real user's count.
+func TestThrottleFloodKeepsUserCounts(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newUserService(t)
+	if _, err := s.CreateUser(ctx, "erin", "erins password", []string{"*:r"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range maxFailsPerUser {
+		s.Login(ctx, "erin", "wrong wrong", fmt.Sprintf("10.1.%d.%d", i/250, i%250))
+	}
+	if _, _, _, err := s.Login(ctx, "erin", "wrong again", "10.2.0.1"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("per-name limit not reached: %v", err)
+	}
+	// Junk names cost no hashing; flood the table with them from fresh
+	// networks, well past its cap.
+	for i := range 2 * maxLooseEntries {
+		s.Login(ctx, "!!", "x", fmt.Sprintf("2001:db8:%x:%x::1", i>>16, i&0xffff))
+	}
+	if _, _, _, err := s.Login(ctx, "erin", "erins password", "10.3.0.1"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("flood reset erin's count: %v", err)
+	}
+}
+
+// A distributed attack on a name doesn't lock its owner out of a network
+// they signed in from; it still stops everyone else.
+func TestThrottleTrustsKnownNetwork(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newUserService(t)
+	if _, err := s.CreateUser(ctx, "fay", "fays password", []string{"*:r"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.Login(ctx, "fay", "fays password", "203.0.113.9"); err != nil {
+		t.Fatal(err)
+	}
+	*clock = clock.Add(time.Hour)
+	for i := range maxFailsPerUser + 5 {
+		s.Login(ctx, "fay", "wrong wrong", fmt.Sprintf("10.4.%d.%d", i/250, i%250))
+	}
+	if _, _, _, err := s.Login(ctx, "fay", "fays password", "10.5.0.1"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Errorf("new network not stopped by the per-name limit: %v", err)
+	}
+	if _, _, _, err := s.Login(ctx, "fay", "fays password", "203.0.113.9"); err != nil {
+		t.Errorf("owner locked out of their own network: %v", err)
+	}
+	// After a password reset the network is no longer vouched for.
+	if err := s.SetPassword(ctx, "fay", "fays new password", Principal{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := s.Login(ctx, "fay", "fays new password", "203.0.113.9"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Errorf("reset didn't forget known networks: %v", err)
+	}
+}
+
+// resetDuringLogin changes the user's password right after a sign-in has
+// read the user record, i.e. while the old password is being checked.
+type resetDuringLogin struct {
+	store.Users
+	once  sync.Once
+	reset func()
+}
+
+func (r *resetDuringLogin) GetUser(ctx context.Context, name string) (store.UserRecord, error) {
+	u, err := r.Users.GetUser(ctx, name)
+	r.once.Do(r.reset)
+	return u, err
+}
+
+func TestLoginRacingPasswordReset(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newUserService(t)
+	if _, err := s.CreateUser(ctx, "gil", "old password!", []string{"*:r"}); err != nil {
+		t.Fatal(err)
+	}
+	base := s.users
+	s.users = &resetDuringLogin{Users: base, reset: func() {
+		if _, err := base.UpdateUser(ctx, "gil", func(u *store.UserRecord) error {
+			u.PasswordHash, _ = s.hash("new password!")
+			return nil
+		}, true, ""); err != nil {
+			t.Error(err)
+		}
+	}}
+	if _, _, _, err := s.Login(ctx, "gil", "old password!", "1.2.3.4"); !errors.Is(err, ErrBadCredentials) {
+		t.Fatalf("old password signed in after a reset: %v", err)
+	}
+	s.users = base
+	if _, _, _, err := s.Login(ctx, "gil", "new password!", "1.2.3.4"); err != nil {
+		t.Fatalf("new password: %v", err)
 	}
 }
 
@@ -406,4 +548,79 @@ func TestConcurrentLogins(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+// Two deletes at once must not remove both of the last two admin keys.
+func TestDeleteLastAdminKeysConcurrently(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newUserService(t)
+	for round := range 20 {
+		_, a, err := s.CreateKey(ctx, fmt.Sprintf("a%d", round), []string{"*:admin"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, b, err := s.CreateKey(ctx, fmt.Sprintf("b%d", round), []string{"*:admin"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys, _ := s.ListKeys(ctx)
+		for _, k := range keys { // leave exactly a and b as admins
+			if k.ID != a.ID && k.ID != b.ID {
+				if err := s.DeleteKey(ctx, k.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		var wg sync.WaitGroup
+		for _, id := range []string{a.ID, b.ID} {
+			wg.Go(func() { s.DeleteKey(ctx, id) })
+		}
+		wg.Wait()
+		if keys, _ := s.ListKeys(ctx); len(keys) != 1 {
+			t.Fatalf("round %d: %d admin keys left, want 1", round, len(keys))
+		}
+	}
+}
+
+// A session write that fails is logged (once a minute), not silent.
+func TestSessionWriteFailureIsLogged(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newUserService(t)
+	var buf syncBuffer
+	s.WithLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+	if _, err := s.CreateUser(ctx, "hal", "hals password", []string{"*:r"}); err != nil {
+		t.Fatal(err)
+	}
+	tok, _, _, err := s.Login(ctx, "hal", "hals password", "1.2.3.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.users = failingTouch{s.users}
+	*clock = clock.Add(touchEvery + time.Second) // due for a LastSeen write
+	for range 3 {                                // each retries the write, since LastSeen stays old
+		*clock = clock.Add(10 * time.Second)
+		if _, err := authAs(t, s, tok); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := strings.Count(buf.String(), "could not record session activity"); n != 1 {
+		t.Errorf("logged %d times within a minute, want 1:\n%s", n, buf.String())
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

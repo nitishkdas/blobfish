@@ -229,9 +229,70 @@ func newClient(allowPrivate bool) *http.Client {
 // IsPublic reports whether a is a globally routable unicast address.
 func IsPublic(a netip.Addr) bool {
 	a = a.Unmap()
-	return a.IsValid() && a.IsGlobalUnicast() && !a.IsPrivate() && !a.IsLoopback() &&
-		!a.IsLinkLocalUnicast() && !cgnat.Contains(a)
+	switch {
+	case !a.IsValid():
+		return false
+	case a.Is4():
+		return !inAny(a, special4)
+	case nat64.Contains(a):
+		// DNS64 hosts reach IPv4 sites through these: judge the embedded
+		// IPv4 address, so a NAT64 gateway can't be used to reach 10.x.
+		b := a.As16()
+		return !inAny(netip.AddrFrom4([4]byte(b[12:])), special4)
+	case !global6.Contains(a):
+		return false
+	default:
+		return !inAny(a, special6)
+	}
 }
 
-// cgnat is carrier-grade NAT space (RFC 6598), private in practice.
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+func inAny(a netip.Addr, ps []netip.Prefix) bool {
+	for _, p := range ps {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+func prefixes(ss ...string) []netip.Prefix {
+	out := make([]netip.Prefix, len(ss))
+	for i, s := range ss {
+		out[i] = netip.MustParsePrefix(s)
+	}
+	return out
+}
+
+// The IANA special-purpose address registries (RFC 6890 and updates):
+// everything not reachable on the public internet, or that embeds another
+// address a webhook could use to reach one that isn't.
+var (
+	special4 = prefixes(
+		"0.0.0.0/8",       // "this network"
+		"10.0.0.0/8",      // private
+		"100.64.0.0/10",   // carrier-grade NAT
+		"127.0.0.0/8",     // loopback
+		"169.254.0.0/16",  // link-local (cloud metadata services)
+		"172.16.0.0/12",   // private
+		"192.0.0.0/24",    // IETF protocol assignments
+		"192.0.2.0/24",    // documentation
+		"192.88.99.0/24",  // 6to4 relay anycast (deprecated)
+		"192.168.0.0/16",  // private
+		"198.18.0.0/15",   // benchmarking
+		"198.51.100.0/24", // documentation
+		"203.0.113.0/24",  // documentation
+		"224.0.0.0/4",     // multicast
+		"240.0.0.0/4",     // reserved, and broadcast
+	)
+	// global6 is the only IPv6 space assigned for global unicast; anything
+	// outside it (loopback, ::/96 IPv4-compatible, unique local, link-local,
+	// multicast, discard) is refused.
+	global6  = netip.MustParsePrefix("2000::/3")
+	special6 = prefixes(
+		"2001::/23",     // IETF protocol assignments, incl. Teredo (embeds IPv4)
+		"2001:db8::/32", // documentation
+		"2002::/16",     // 6to4 (embeds IPv4)
+		"3fff::/20",     // documentation
+	)
+	nat64 = netip.MustParsePrefix("64:ff9b::/96") // well-known NAT64 prefix
+)

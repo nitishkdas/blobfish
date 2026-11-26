@@ -15,11 +15,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -50,31 +48,33 @@ const (
 
 	pbkdf2KeyLen = 32
 
-	// Failed sign-ins allowed per window. Per name *and* network, so one
-	// attacker can't lock a person out from everywhere with 10 guesses;
-	// per name overall, so a distributed attack still stops; per network,
-	// so one source can't spray many names. IPv6 counts per /64.
+	// Failed sign-ins allowed per window (see throttle.go). Per name *and*
+	// network, so one attacker can't lock a person out from everywhere
+	// with 10 guesses; per name overall, so a distributed attack still
+	// stops (except on networks the person signed in from recently); per
+	// network, so one source can't spray many names. IPv6 counts per /64.
 	throttleWindow     = 15 * time.Minute
 	maxFailsPerUserNet = 10
 	maxFailsPerUser    = 100
 	maxFailsPerNet     = 30
 	maxFailsOwnPw      = 10 // wrong current password when changing it
-	// maxThrottleEntries caps the failure table. Keys are short (names are
-	// checked first), so this is well under 2 MB.
-	maxThrottleEntries = 10_000
+
+	// defaultPasswordCost: PBKDF2-HMAC-SHA256 at OWASP's recommended
+	// count. It is in the standard library and needs no memory, which
+	// matters on a 512 MB server; the throttle keeps guessing slow anyway.
+	// Each hash records its own count, so raising this later doesn't break
+	// stored passwords.
+	defaultPasswordCost = 600_000
+	cheapPasswordCost   = 1000
 )
 
-// pbkdf2Iterations: PBKDF2-HMAC-SHA256 at OWASP's recommended count. It is
-// in the standard library and needs no memory, which matters on a 512 MB
-// server; the throttle keeps guessing slow anyway. Each hash records its
-// own count, so raising this later doesn't break stored passwords. A
-// variable only so tests can lower it.
-var pbkdf2Iterations = 600_000
-
-// UseCheapPasswordHashForTests makes password hashing fast. Tests only:
-// stored hashes record their cost, so this never weakens real data, but
-// passwords set while it is on are cheap to guess.
-func UseCheapPasswordHashForTests() { pbkdf2Iterations = 1000 }
+// UseCheapPasswordHashForTests makes this Service hash passwords fast.
+// Tests only: stored hashes record their cost, so this never weakens
+// existing data, but passwords set while it is on are cheap to guess.
+func (s *Service) UseCheapPasswordHashForTests() *Service {
+	s.passwordCost = cheapPasswordCost
+	return s
+}
 
 var userNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,63}$`)
 
@@ -103,15 +103,15 @@ func CheckPassword(name, pw string) error {
 }
 
 // hashPassword returns "pbkdf2-sha256$<iter>$<salt>$<hash>".
-func hashPassword(pw string) (string, error) {
+func hashPassword(pw string, iter int) (string, error) {
 	salt := make([]byte, 16)
 	rand.Read(salt)
-	key, err := pbkdf2.Key(sha256.New, pw, salt, pbkdf2Iterations, pbkdf2KeyLen)
+	key, err := pbkdf2.Key(sha256.New, pw, salt, iter, pbkdf2KeyLen)
 	if err != nil {
 		return "", err
 	}
 	enc := base64.RawStdEncoding
-	return "pbkdf2-sha256$" + strconv.Itoa(pbkdf2Iterations) + "$" + enc.EncodeToString(salt) + "$" + enc.EncodeToString(key), nil
+	return "pbkdf2-sha256$" + strconv.Itoa(iter) + "$" + enc.EncodeToString(salt) + "$" + enc.EncodeToString(key), nil
 }
 
 // passwordMatches checks pw against a stored hash in constant time.
@@ -134,87 +134,20 @@ func passwordMatches(stored, pw string) bool {
 	return err == nil && subtle.ConstantTimeCompare(got, want) == 1
 }
 
+// hash hashes a new password at this Service's cost.
+func (s *Service) hash(pw string) (string, error) { return hashPassword(pw, s.passwordCost) }
+
 // dummyHash is checked when the user doesn't exist, so a sign-in takes
-// the same time whether or not the name is real.
-var dummyHash = sync.OnceValue(func() string {
-	h, _ := hashPassword("not a real password, only for timing")
-	return h
-})
-
-// throttle counts failed sign-ins per user name and per client IP.
-type throttle struct {
-	mu    sync.Mutex
-	fails map[string]*failCount
-}
-
-type failCount struct {
-	n     int
-	first time.Time
-}
-
-// blocked reports how long key must wait, or 0.
-func (t *throttle) blocked(key string, limit int, now time.Time) time.Duration {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	f := t.fails[key]
-	if f == nil || now.Sub(f.first) >= throttleWindow {
-		return 0
+// the same time whether or not the name is real. Made at the current
+// cost on each use's first need, so it always costs what a real one does.
+func (s *Service) dummyHash() string {
+	s.dummyMu.Lock()
+	defer s.dummyMu.Unlock()
+	if s.dummy == "" || s.dummyCost != s.passwordCost {
+		s.dummy, _ = hashPassword("not a real password, only for timing", s.passwordCost)
+		s.dummyCost = s.passwordCost
 	}
-	if f.n >= limit {
-		return f.first.Add(throttleWindow).Sub(now)
-	}
-	return 0
-}
-
-func (t *throttle) fail(key string, now time.Time) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.fails == nil {
-		t.fails = map[string]*failCount{}
-	}
-	if len(t.fails) >= maxThrottleEntries {
-		for k, f := range t.fails {
-			if now.Sub(f.first) >= throttleWindow {
-				delete(t.fails, k)
-			}
-		}
-		// Still full: a flood of fresh networks. Forget arbitrary entries
-		// (map order is random) rather than grow; losing some counts is
-		// better than running the server out of memory.
-		for k := range t.fails {
-			if len(t.fails) < maxThrottleEntries*9/10 {
-				break
-			}
-			delete(t.fails, k)
-		}
-	}
-	f := t.fails[key]
-	if f == nil || now.Sub(f.first) >= throttleWindow {
-		t.fails[key] = &failCount{n: 1, first: now}
-		return
-	}
-	f.n++
-}
-
-func (t *throttle) reset(key string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	delete(t.fails, key)
-}
-
-// clientNet is the unit the throttle counts per: the address for IPv4,
-// its /64 for IPv6 (one subscriber usually gets a whole /64).
-func clientNet(ip string) string {
-	a, err := netip.ParseAddr(ip)
-	if err != nil {
-		return ip
-	}
-	a = a.Unmap()
-	if a.Is4() {
-		return a.String()
-	}
-	p, _ := a.Prefix(64)
-	return p.String()
+	return s.dummy
 }
 
 // acquireHash waits for a password-hashing slot, or for ctx to end (the
@@ -247,48 +180,55 @@ func (s *Service) Login(ctx context.Context, name, pw, clientIP string) (string,
 		return "", store.SessionRecord{}, store.UserRecord{}, ErrBadCredentials
 	}
 	now := s.now()
-	netKey := "net:" + clientNet(clientIP)
+	net := clientNet(clientIP)
+	netLimit := limit{key: "net:" + net, max: maxFailsPerNet}
 	name, err := NormalizeUserName(name)
 	if err != nil {
-		// No user can have this name, so don't record it per name: junk
+		// No user can have this name, so don't count it per name: junk
 		// names (up to the body limit) would otherwise fill the table.
-		if wait := s.throttle.blocked(netKey, maxFailsPerNet, now); wait > 0 {
+		if wait := s.throttle.begin(now, netLimit); wait > 0 {
 			return "", store.SessionRecord{}, store.UserRecord{}, TooManyAttemptsError{Wait: wait}
 		}
-		s.throttle.fail(netKey, now)
 		return "", store.SessionRecord{}, store.UserRecord{}, ErrBadCredentials
 	}
-	userKey := "u:" + name
-	userNetKey := userKey + "|" + netKey
-	if wait := max(
-		s.throttle.blocked(userNetKey, maxFailsPerUserNet, now),
-		s.throttle.blocked(userKey, maxFailsPerUser, now),
-		s.throttle.blocked(netKey, maxFailsPerNet, now),
-	); wait > 0 {
+	user, err := s.users.GetUser(ctx, name)
+	exists := err == nil
+	if err != nil && !errors.Is(err, store.ErrNoSuchUser) {
+		return "", store.SessionRecord{}, store.UserRecord{}, err
+	}
+	// The same limits apply whether or not the name exists (so the throttle
+	// can't be used to find out); only where the counts are kept differs.
+	userLimit := limit{key: "u:" + name, max: maxFailsPerUser, pinned: exists}
+	if exists && s.throttle.trusted(name, net, now) {
+		userLimit.max = 0 // counted, but doesn't block a network they use
+	}
+	limits := []limit{
+		{key: "u:" + name + "|" + net, max: maxFailsPerUserNet, pinned: exists},
+		userLimit,
+		netLimit,
+	}
+	if wait := s.throttle.begin(now, limits...); wait > 0 {
 		return "", store.SessionRecord{}, store.UserRecord{}, TooManyAttemptsError{Wait: wait}
 	}
 	if err := s.acquireHash(ctx); err != nil { // few hashes at once: they are CPU-heavy
+		s.throttle.undo(now, limits...) // gave up before guessing
 		return "", store.SessionRecord{}, store.UserRecord{}, err
 	}
-	user, err := s.users.GetUser(ctx, name)
-	ok := false
-	switch {
-	case err == nil:
+	var ok bool
+	if exists {
 		ok = passwordMatches(user.PasswordHash, pw)
-	case errors.Is(err, store.ErrNoSuchUser):
-		passwordMatches(dummyHash(), pw)
-	default:
-		<-s.hashing
-		return "", store.SessionRecord{}, store.UserRecord{}, err
+	} else {
+		passwordMatches(s.dummyHash(), pw)
 	}
 	<-s.hashing
 	if !ok {
-		for _, k := range []string{userNetKey, userKey, netKey} {
-			s.throttle.fail(k, now)
-		}
 		return "", store.SessionRecord{}, store.UserRecord{}, ErrBadCredentials
 	}
-	s.throttle.reset(userNetKey) // the per-name total stays: it counts others' guesses too
+	// Not a wrong guess: take it back. The per-name total keeps the others'
+	// guesses; this network's count for this name starts over.
+	s.throttle.undo(now, limits[1:]...)
+	s.throttle.reset(limits[0])
+	s.throttle.trust(name, net, now)
 
 	var secret [32]byte
 	rand.Read(secret[:])
@@ -299,7 +239,13 @@ func (s *Service) Login(ctx context.Context, name, pw, clientIP string) (string,
 		ID: hex.EncodeToString(id[:]), Hash: hashToken(token), User: user.Name,
 		Created: now.UTC(), LastSeen: now.UTC(), Expires: now.Add(SessionMax).UTC(),
 	}
-	if err := s.users.CreateSession(ctx, sess); err != nil {
+	// The session is stored only if the password just checked is still the
+	// user's: a reset (or the user deleted and made again) while it was
+	// being hashed must not let the old password in.
+	if err := s.users.CreateSession(ctx, sess, user.PasswordHash); err != nil {
+		if errors.Is(err, store.ErrUserChanged) || errors.Is(err, store.ErrNoSuchUser) {
+			return "", store.SessionRecord{}, store.UserRecord{}, ErrBadCredentials
+		}
 		return "", store.SessionRecord{}, store.UserRecord{}, fmt.Errorf("start session: %w", err)
 	}
 	user.LastLogin = sess.Created
@@ -325,14 +271,20 @@ func (s *Service) authenticateSession(ctx context.Context, token string) (Princi
 	}
 	now := s.now()
 	if sessionExpired(sess, now) {
-		s.users.DeleteSession(ctx, hash)
+		// Best effort: the janitor's purge deletes it later anyway.
+		if err := s.users.DeleteSession(ctx, hash); err != nil {
+			s.logSessionWriteError("delete ended session", err)
+		}
 		return Principal{}, ErrUnauthenticated
 	}
 	if now.Sub(sess.LastSeen) > touchEvery {
 		// Best effort: if it can't be written (disk full), the session only
 		// times out a little sooner; failing the request would block even
-		// deletes, which must work on a full disk.
-		s.users.TouchSession(ctx, hash, now.UTC())
+		// deletes, which must work on a full disk. But say so: otherwise
+		// people get signed out for no visible reason.
+		if err := s.users.TouchSession(ctx, hash, now.UTC()); err != nil {
+			s.logSessionWriteError("record session activity", err)
+		}
 	}
 	// The user's current scopes, so an admin's change applies at once.
 	// KeyID includes the creation time so a later user with the same name
@@ -384,7 +336,7 @@ func (s *Service) CreateUser(ctx context.Context, name, pw string, scopes []stri
 	if err := checkScopes(scopes); err != nil {
 		return store.UserRecord{}, err
 	}
-	hash, err := hashPassword(pw)
+	hash, err := s.hash(pw)
 	if err != nil {
 		return store.UserRecord{}, err
 	}
@@ -412,7 +364,7 @@ func (s *Service) SetPassword(ctx context.Context, name, pw string, keep Princip
 	if err := CheckPassword(name, pw); err != nil {
 		return err
 	}
-	hash, err := hashPassword(pw)
+	hash, err := s.hash(pw)
 	if err != nil {
 		return err
 	}
@@ -425,6 +377,11 @@ func (s *Service) SetPassword(ctx context.Context, name, pw string, keep Princip
 		u.PasswordChanged = s.now().UTC()
 		return nil
 	}, true, keepHash)
+	if err == nil {
+		// A reset often means the old password leaked: networks it was
+		// used from are no longer vouched for.
+		s.throttle.forget(name)
+	}
 	return err
 }
 
@@ -439,19 +396,20 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, p Principal, current, n
 		return err
 	}
 	now := s.now()
-	key := "pw:" + p.User
-	if wait := s.throttle.blocked(key, maxFailsOwnPw, now); wait > 0 {
+	l := limit{key: "pw:" + p.User, max: maxFailsOwnPw, pinned: true}
+	if wait := s.throttle.begin(now, l); wait > 0 {
 		return TooManyAttemptsError{Wait: wait}
 	}
 	if err := s.acquireHash(ctx); err != nil {
+		s.throttle.undo(now, l)
 		return err
 	}
 	ok := passwordMatches(user.PasswordHash, current)
 	<-s.hashing
 	if !ok {
-		s.throttle.fail(key, now)
 		return ErrBadCredentials
 	}
+	s.throttle.undo(now, l)
 	return s.SetPassword(ctx, p.User, next, p)
 }
 
@@ -469,7 +427,11 @@ func (s *Service) SetUserScopes(ctx context.Context, name string, scopes []strin
 
 // DeleteUser removes a user and ends their sessions.
 func (s *Service) DeleteUser(ctx context.Context, name string) error {
-	return s.users.DeleteUser(ctx, name)
+	err := s.users.DeleteUser(ctx, name)
+	if err == nil {
+		s.throttle.forget(name)
+	}
+	return err
 }
 
 // SignOutUser ends all of a user's sessions.
@@ -487,4 +449,15 @@ func (s *Service) PurgeExpiredSessions(ctx context.Context) (int, error) {
 	}
 	now := s.now()
 	return s.users.PurgeSessions(ctx, func(sess store.SessionRecord) bool { return sessionExpired(sess, now) })
+}
+
+// logSessionWriteError reports a failed best-effort session write, at
+// most once a minute (a full disk would otherwise log on every request).
+func (s *Service) logSessionWriteError(what string, err error) {
+	now := s.now().UnixNano()
+	last := s.lastWriteWarn.Load()
+	if now-last < int64(time.Minute) || !s.lastWriteWarn.CompareAndSwap(last, now) {
+		return
+	}
+	s.log.Warn("could not "+what+"; sessions may end early", "err", err)
 }

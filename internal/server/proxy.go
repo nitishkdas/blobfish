@@ -90,3 +90,20 @@ func ParseTrustedProxies(list []string) ([]netip.Prefix, error) {
 	}
 	return out, nil
 }
+
+// hstsMaxAge: one year, the usual value (and what preload lists ask for).
+const hstsMaxAge = "max-age=31536000"
+
+// hstsMiddleware tells browsers that reached us over https to never use
+// plain http for this host again, so a network attacker can't downgrade a
+// later visit and read the token the UI sends. Only on https responses
+// (RFC 6797 says to ignore it over http anyway), and without
+// includeSubDomains: other services on sibling hosts aren't ours to decide.
+func hstsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if clientFrom(r).https {
+			w.Header().Set("Strict-Transport-Security", hstsMaxAge)
+		}
+		next.ServeHTTP(w, r)
+	})
+}

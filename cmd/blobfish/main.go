@@ -91,7 +91,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	}
 	defer eng.Close()
 
-	authSvc := auth.NewService(eng, eng.PresignSecret()).UseUsers(eng)
+	authSvc := auth.NewService(eng, eng.PresignSecret()).UseUsers(eng).WithLogger(log)
 	if *newAdminKey {
 		token, rec, err := authSvc.CreateKey(ctx, "recovery-admin", []string{"*:admin"})
 		if err != nil {
@@ -154,6 +154,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			DataFormat:     engine.FormatVersion,
 			PublicURL:      cfg.PublicURL,
 			MinQuotaBytes:  minQuotaBytes,
+			OperatorName:   cfg.OperatorName,
+			PrivacyURL:     cfg.PrivacyURL,
 		}),
 		// Headers get a fixed limit. Bodies can be multi-GB streams on slow
 		// links, so instead of ReadTimeout/WriteTimeout (which bound the whole
@@ -168,6 +170,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	}
 
 	log.Info("blobfish starting", "version", version, "addr", ln.Addr().String(), "data_dir", cfg.DataDir)
+	if exposedWithoutTLS(ln.Addr(), cfg) {
+		log.Warn("listening on a non-loopback address over plain HTTP with no trusted_proxies set: " +
+			"passwords and keys cross the network unencrypted unless a TLS proxy is in front. " +
+			"Put Caddy in front (docs/deploy.md) and set trusted_proxies, or listen on 127.0.0.1")
+	}
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(ln) }()
@@ -205,6 +212,17 @@ func newLogger(cfg config.Config, w io.Writer) (*slog.Logger, error) {
 
 // purgeSessionsLoop deletes ended sign-in sessions every janitorInterval.
 // They already stop working when they end; this only frees the space.
+// exposedWithoutTLS reports whether the server takes plain-HTTP
+// connections from other machines with nothing saying a TLS proxy is in
+// front (trusted_proxies empty, public_url not https).
+func exposedWithoutTLS(addr net.Addr, cfg config.Config) bool {
+	tcp, ok := addr.(*net.TCPAddr)
+	if !ok || tcp.IP.IsLoopback() {
+		return false
+	}
+	return len(cfg.TrustedProxies) == 0 && !strings.HasPrefix(cfg.PublicURL, "https://")
+}
+
 func purgeSessionsLoop(ctx context.Context, svc *auth.Service, log *slog.Logger) {
 	t := time.NewTicker(janitorInterval)
 	defer t.Stop()

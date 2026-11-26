@@ -80,19 +80,58 @@ func (e *Engine) ListKeys(ctx context.Context) ([]store.KeyRecord, error) {
 }
 
 // DeleteKey implements store.Keys. Keys are few, so a scan is fine.
-func (e *Engine) DeleteKey(ctx context.Context, id string) error {
+func (e *Engine) DeleteKey(ctx context.Context, id string, allow func(store.KeyRecord, []store.KeyRecord) error) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
 		keys := tx.Bucket(bktKeys)
-		c := keys.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		var all []store.KeyRecord
+		var targetHash []byte
+		var target store.KeyRecord
+		err := keys.ForEach(func(k, v []byte) error {
 			var rec store.KeyRecord
 			if err := json.Unmarshal(v, &rec); err != nil {
 				return fmt.Errorf("decode API key: %w", err)
 			}
 			if rec.ID == id {
-				return keys.Delete(k)
+				targetHash, target = slices.Clone(k), rec
+			}
+			all = append(all, rec)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if targetHash == nil {
+			return fmt.Errorf("%w: %s", store.ErrNoSuchAPIKey, id)
+		}
+		if allow != nil {
+			if err := allow(target, all); err != nil {
+				return err
 			}
 		}
-		return fmt.Errorf("%w: %s", store.ErrNoSuchAPIKey, id)
+		return keys.Delete(targetHash)
 	})
+}
+
+// KeyByID returns the key with this id, or ErrNoSuchAPIKey.
+func (e *Engine) KeyByID(ctx context.Context, id string) (store.KeyRecord, error) {
+	var out store.KeyRecord
+	err := e.db.View(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bktKeys).ForEach(func(_, v []byte) error {
+			if out.ID != "" {
+				return nil
+			}
+			var rec store.KeyRecord
+			if err := json.Unmarshal(v, &rec); err != nil {
+				return fmt.Errorf("decode API key: %w", err)
+			}
+			if rec.ID == id {
+				out = rec
+			}
+			return nil
+		})
+	})
+	if err == nil && out.ID == "" {
+		err = fmt.Errorf("%w: %s", store.ErrNoSuchAPIKey, id)
+	}
+	return out, err
 }

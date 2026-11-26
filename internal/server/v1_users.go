@@ -48,9 +48,18 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	setActor(r, "login:"+truncate(req.Username, 64))
 	token, sess, user, err := a.auth.Login(r.Context(), req.Username, req.Password, clientFrom(r).ip)
 	if err != nil {
+		// Name the account being tried, but only if it exists: people
+		// sometimes type their password into the name field, and that
+		// must not end up in the log.
+		actor := "login:(unknown name)"
+		if name, nerr := auth.NormalizeUserName(req.Username); nerr == nil {
+			if _, uerr := a.auth.GetUser(r.Context(), name); uerr == nil {
+				actor = "login:" + name
+			}
+		}
+		setActor(r, actor)
 		if !a.failThrottled(w, r, err) {
 			a.fail(w, r, err)
 		}
@@ -65,13 +74,6 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 		"idleTimeoutSeconds": int(auth.SessionIdle.Seconds()),
 		"user":               toUserJSON(user),
 	})
-}
-
-func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
-	}
-	return s
 }
 
 func (a *api) logout(w http.ResponseWriter, r *http.Request) {

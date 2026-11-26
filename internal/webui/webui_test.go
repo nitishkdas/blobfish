@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"compress/gzip"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -85,5 +87,55 @@ func TestFavicon(t *testing.T) {
 	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/svg+xml" ||
 		!strings.Contains(rr.Body.String(), "<svg") {
 		t.Fatalf("favicon: %d %q", rr.Code, rr.Header().Get("Content-Type"))
+	}
+}
+
+func TestServesOnlyFiles(t *testing.T) {
+	h := Handler()
+	for _, p := range []string{"/ui/js/", "/ui/js", "/ui/nope.js", "/ui/../go.mod"} {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, p, nil))
+		if rr.Code != http.StatusNotFound || strings.Contains(rr.Body.String(), "app.js") {
+			t.Errorf("GET %s = %d %q, want 404 and no listing", p, rr.Code, rr.Body)
+		}
+	}
+}
+
+func TestCachingAndCompression(t *testing.T) {
+	h := Handler()
+	get := func(hdr ...string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/ui/js/files.js", nil)
+		for i := 0; i+1 < len(hdr); i += 2 {
+			r.Header.Set(hdr[i], hdr[i+1])
+		}
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, r)
+		return rr
+	}
+	plain := get()
+	etag := plain.Header().Get("ETag")
+	if plain.Code != 200 || etag == "" || plain.Header().Get("Content-Encoding") != "" ||
+		!strings.Contains(plain.Header().Get("X-Robots-Tag"), "noindex") {
+		t.Fatalf("plain: %d %v", plain.Code, plain.Header())
+	}
+	if rr := get("If-None-Match", etag); rr.Code != http.StatusNotModified || rr.Body.Len() != 0 {
+		t.Errorf("revalidation = %d with %d bytes", rr.Code, rr.Body.Len())
+	}
+	if rr := get("If-None-Match", `W/`+etag); rr.Code != http.StatusNotModified {
+		t.Errorf("weak revalidation = %d", rr.Code)
+	}
+	gz := get("Accept-Encoding", "br, gzip")
+	if gz.Header().Get("Content-Encoding") != "gzip" || gz.Body.Len() >= plain.Body.Len() {
+		t.Fatalf("gzip: %v, %d vs %d bytes", gz.Header(), gz.Body.Len(), plain.Body.Len())
+	}
+	zr, err := gzip.NewReader(gz.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := io.ReadAll(zr); string(got) != plain.Body.String() {
+		t.Error("gzip body differs from the file")
+	}
+	if rr := get("Accept-Encoding", "gzip;q=0"); rr.Header().Get("Content-Encoding") != "" {
+		t.Error("gzip sent although refused")
 	}
 }

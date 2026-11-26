@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -102,7 +103,7 @@ func logMiddleware(log *slog.Logger, stats *serverStats) func(http.Handler) http
 			attrs := []any{
 				"request_id", RequestID(r.Context()),
 				"method", r.Method,
-				"path", r.URL.Path,
+				"path", logPath(r.URL.Path),
 				"status", status,
 			}
 			if fields.errCode != "" {
@@ -125,6 +126,24 @@ func logMiddleware(log *slog.Logger, stats *serverStats) func(http.Handler) http
 			}
 		})
 	}
+}
+
+// logPath is the request path as the access log shows it. Share and upload
+// link paths carry their token, which is the credential itself: it is
+// replaced (the "key" field names the link by its ID instead).
+func logPath(p string) string {
+	for _, prefix := range []string{"/s/", "/u/"} {
+		rest, ok := strings.CutPrefix(p, prefix)
+		if !ok || rest == "" {
+			continue
+		}
+		_, tail, more := strings.Cut(rest, "/")
+		if more {
+			return prefix + "<token>/" + tail
+		}
+		return prefix + "<token>"
+	}
+	return p
 }
 
 // statusRecorder captures the status code and body size a handler writes.

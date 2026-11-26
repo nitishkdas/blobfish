@@ -18,11 +18,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Config is the full server configuration.
 type Config struct {
-	// Listen is the TCP address the HTTP server binds to, e.g. ":8080".
+	// Listen is the TCP address the HTTP server binds to. The default,
+	// "127.0.0.1:8080", is reachable only from this machine: BlobFish
+	// speaks plain HTTP and expects a TLS proxy (Caddy) in front. Use
+	// ":8080" in a container, or to reach it from other machines.
 	Listen string `json:"listen"`
 	// DataDir is the folder holding meta.db, objects/ and tmp/.
 	DataDir string `json:"data_dir"`
@@ -54,6 +58,11 @@ type Config struct {
 	// X-Forwarded-For / X-Forwarded-Proto headers are believed, e.g.
 	// ["127.0.0.1"] when Caddy runs on the same machine.
 	TrustedProxies []string `json:"trusted_proxies"`
+	// OperatorName and PrivacyURL are shown on upload-link pages, so
+	// people sending files know who receives them and where to read how
+	// their data is handled (privacy laws expect this notice).
+	OperatorName string `json:"operator_name"`
+	PrivacyURL   string `json:"privacy_url"`
 }
 
 // MaxTrashDays caps trash_days (ten years).
@@ -84,7 +93,7 @@ func (d Duration) MarshalText() ([]byte, error) { return []byte(time.Duration(d)
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
-		Listen:        ":8080",
+		Listen:        "127.0.0.1:8080",
 		DataDir:       "data",
 		MaxObjectSize: 5 << 30, // 5 GiB
 		LogLevel:      "info",
@@ -184,6 +193,12 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		}
 		cfg.TrashDays = n
 	}
+	if v := getenv("BLOBFISH_OPERATOR_NAME"); v != "" {
+		cfg.OperatorName = v
+	}
+	if v := getenv("BLOBFISH_PRIVACY_URL"); v != "" {
+		cfg.PrivacyURL = v
+	}
 	if v := getenv("BLOBFISH_MAX_CONNECTIONS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -239,6 +254,15 @@ func (c Config) Validate() error {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
 			(u.Path != "" && u.Path != "/") || u.RawQuery != "" {
 			return fmt.Errorf("config: public_url must look like https://host[:port], got %q", c.PublicURL)
+		}
+	}
+	if len(c.OperatorName) > 200 || strings.ContainsFunc(c.OperatorName, unicode.IsControl) {
+		return errors.New("config: operator_name must be at most 200 bytes, without control characters")
+	}
+	if c.PrivacyURL != "" {
+		u, err := url.Parse(c.PrivacyURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("config: privacy_url must be an http(s) address, got %q", c.PrivacyURL)
 		}
 	}
 	return nil

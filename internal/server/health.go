@@ -3,10 +3,12 @@ package server
 import (
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
+	"github.com/nitishkdas/blobfish/internal/store"
 )
 
 // serverStats counts traffic for GET /v1/status.
@@ -45,6 +47,33 @@ func (c *countingBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// healthCacheFor is how long a health check's result is reused. Each check
+// writes and fsyncs a probe file; without a cache anyone could make the
+// server do that as fast as they can send requests (hard on SD cards).
+const healthCacheFor = 5 * time.Second
+
+// healthCache holds the last health report. The mutex is held while a
+// check runs, so a burst of requests causes one check, not many.
+type healthCache struct {
+	mu  sync.Mutex
+	at  time.Time
+	rep store.HealthReport
+}
+
+// healthReport returns a recent report, running a check if the last one
+// is older than healthCacheFor. fresh is true when this call ran it.
+func (a *api) healthReport(r *http.Request) (rep store.HealthReport, fresh bool) {
+	c := &a.healthCache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.at.IsZero() && time.Since(c.at) < healthCacheFor {
+		return c.rep, false
+	}
+	c.rep = a.health.Health(r.Context())
+	c.at = time.Now()
+	return c.rep, true
+}
+
 // healthz is for load balancers and monitors, so it needs no key and
 // reveals only ok/failing per check. 503 when the metadata store or the
 // data disk is broken; "degraded" (still 200) when free space is at the
@@ -54,7 +83,7 @@ func (a *api) healthz(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
-	rep := a.health.Health(r.Context())
+	rep, fresh := a.healthReport(r)
 	okOr := func(err error) string {
 		if err != nil {
 			return "failing"
@@ -74,6 +103,8 @@ func (a *api) healthz(w http.ResponseWriter, r *http.Request) {
 	}
 	if rep.Metadata != nil || rep.Disk != nil {
 		status, code = "unavailable", http.StatusServiceUnavailable
+	}
+	if fresh && code != http.StatusOK { // once per check, not per request
 		a.log.ErrorContext(r.Context(), "health check failing",
 			"request_id", RequestID(r.Context()), "metadata", rep.Metadata, "disk", rep.Disk)
 	}
@@ -118,7 +149,7 @@ func (a *api) status(w http.ResponseWriter, r *http.Request) {
 	out.UptimeSec = int64(time.Since(a.stats.started).Seconds())
 	out.Disk.FreeBytes = -1
 	if a.health != nil {
-		rep := a.health.Health(r.Context())
+		rep, _ := a.healthReport(r)
 		out.Disk.FreeBytes, out.Disk.ReserveBytes, out.Disk.Low = rep.FreeBytes, rep.Reserve, rep.LowSpace
 	}
 	s := a.stats

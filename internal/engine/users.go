@@ -3,6 +3,7 @@ package engine
 import (
 	"cmp"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -118,11 +119,14 @@ func (e *Engine) DeleteUser(ctx context.Context, name string) error {
 }
 
 // CreateSession implements store.Users.
-func (e *Engine) CreateSession(ctx context.Context, rec store.SessionRecord) error {
+func (e *Engine) CreateSession(ctx context.Context, rec store.SessionRecord, passwordHash string) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
 		user, err := getUser(tx, rec.User)
 		if err != nil {
 			return err
+		}
+		if subtle.ConstantTimeCompare([]byte(user.PasswordHash), []byte(passwordHash)) != 1 {
+			return fmt.Errorf("%w: %s", store.ErrUserChanged, rec.User)
 		}
 		sessions := tx.Bucket(bktSessions)
 		if sessions.Get([]byte(rec.Hash)) != nil {

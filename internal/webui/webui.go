@@ -4,9 +4,18 @@
 package webui
 
 import (
+	"bytes"
+	"cmp"
+	"compress/gzip"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"io/fs"
+	"mime"
 	"net/http"
+	"path"
+	"strconv"
+	"strings"
 )
 
 //go:embed static
@@ -61,13 +70,59 @@ func UploadPage() http.Handler {
 	})
 }
 
-// Handler serves the UI under Prefix.
-func Handler() http.Handler {
-	static, err := fs.Sub(files, "static")
+// asset is one embedded file, ready to serve.
+type asset struct {
+	body, gz []byte // gz is nil when compressing doesn't help
+	ctype    string
+	etag     string
+}
+
+// loadAssets reads every embedded file once, at start: its type, a strong
+// ETag from its content (so browsers revalidate with a cheap 304), and a
+// gzip copy for text files (the UI is ~150 KB, ~40 KB compressed).
+func loadAssets() map[string]*asset {
+	out := map[string]*asset{}
+	err := fs.WalkDir(files, "static", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		body, err := files.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(body)
+		a := &asset{
+			body:  body,
+			ctype: cmp.Or(mime.TypeByExtension(path.Ext(p)), "application/octet-stream"),
+			etag:  `"` + hex.EncodeToString(sum[:16]) + `"`,
+		}
+		if len(body) > 1024 && compressible(a.ctype) {
+			var buf bytes.Buffer
+			zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+			zw.Write(body)
+			zw.Close()
+			if buf.Len() < len(body) {
+				a.gz = buf.Bytes()
+			}
+		}
+		out[strings.TrimPrefix(p, "static/")] = a
+		return nil
+	})
 	if err != nil {
-		panic(err) // the embed pattern above guarantees the directory exists
+		panic(err) // embedded at build time
 	}
-	files := http.StripPrefix(Prefix[:len(Prefix)-1], http.FileServerFS(static))
+	return out
+}
+
+func compressible(ctype string) bool {
+	return strings.HasPrefix(ctype, "text/") || strings.Contains(ctype, "javascript") ||
+		strings.Contains(ctype, "json") || strings.HasPrefix(ctype, "image/svg")
+}
+
+// Handler serves the UI under Prefix: exactly the embedded files, no
+// directory listings. "/ui/" is index.html.
+func Handler() http.Handler {
+	assets := loadAssets()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", csp)
@@ -76,7 +131,60 @@ func Handler() http.Handler {
 		// Presigned URLs carry their signature in the query string; never
 		// leak them to other sites through the Referer header.
 		h.Set("Referrer-Policy", "no-referrer")
+		// An admin console has no business in search results.
+		h.Set("X-Robots-Tag", "noindex, nofollow")
+
+		name := strings.TrimPrefix(r.URL.Path, Prefix)
+		if name == "" {
+			name = "index.html"
+		}
+		a := assets[name]
+		if a == nil {
+			http.NotFound(w, r)
+			return
+		}
+		// Revalidate on every load (cheap: 304 via ETag), so an upgrade
+		// never leaves a browser running half old, half new modules.
 		h.Set("Cache-Control", "no-cache")
-		files.ServeHTTP(w, r)
+		h.Set("ETag", a.etag)
+		h.Set("Vary", "Accept-Encoding")
+		if etagMatch(r.Header.Get("If-None-Match"), a.etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		body := a.body
+		if a.gz != nil && acceptsGzip(r) {
+			body = a.gz
+			h.Set("Content-Encoding", "gzip")
+		}
+		h.Set("Content-Type", a.ctype)
+		h.Set("Content-Length", strconv.Itoa(len(body)))
+		if r.Method != http.MethodHead {
+			w.Write(body)
+		}
 	})
+}
+
+// etagMatch reports whether an If-None-Match header lists etag (weak
+// comparison, as RFC 9110 asks for If-None-Match).
+func etagMatch(header, etag string) bool {
+	for t := range strings.SplitSeq(header, ",") {
+		t = strings.TrimPrefix(strings.TrimSpace(t), "W/")
+		if t == etag || t == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+// acceptsGzip reports whether the client accepts gzip (q=0 means no).
+func acceptsGzip(r *http.Request) bool {
+	for part := range strings.SplitSeq(r.Header.Get("Accept-Encoding"), ",") {
+		coding, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		if strings.EqualFold(strings.TrimSpace(coding), "gzip") {
+			q := strings.ReplaceAll(strings.TrimSpace(params), " ", "")
+			return q != "q=0" && q != "q=0.0" && q != "q=0.00" && q != "q=0.000"
+		}
+	}
+	return false
 }
