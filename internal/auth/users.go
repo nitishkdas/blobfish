@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -49,10 +50,18 @@ const (
 
 	pbkdf2KeyLen = 32
 
-	// Failed sign-ins allowed per window, per user name and per client IP.
-	throttleWindow  = 15 * time.Minute
-	maxFailsPerUser = 10
-	maxFailsPerIP   = 30
+	// Failed sign-ins allowed per window. Per name *and* network, so one
+	// attacker can't lock a person out from everywhere with 10 guesses;
+	// per name overall, so a distributed attack still stops; per network,
+	// so one source can't spray many names. IPv6 counts per /64.
+	throttleWindow     = 15 * time.Minute
+	maxFailsPerUserNet = 10
+	maxFailsPerUser    = 100
+	maxFailsPerNet     = 30
+	maxFailsOwnPw      = 10 // wrong current password when changing it
+	// maxThrottleEntries caps the failure table. Keys are short (names are
+	// checked first), so this is well under 2 MB.
+	maxThrottleEntries = 10_000
 )
 
 // pbkdf2Iterations: PBKDF2-HMAC-SHA256 at OWASP's recommended count. It is
@@ -163,11 +172,20 @@ func (t *throttle) fail(key string, now time.Time) {
 	if t.fails == nil {
 		t.fails = map[string]*failCount{}
 	}
-	if len(t.fails) > 10_000 { // bound memory under a spray of names/IPs
+	if len(t.fails) >= maxThrottleEntries {
 		for k, f := range t.fails {
 			if now.Sub(f.first) >= throttleWindow {
 				delete(t.fails, k)
 			}
+		}
+		// Still full: a flood of fresh networks. Forget arbitrary entries
+		// (map order is random) rather than grow; losing some counts is
+		// better than running the server out of memory.
+		for k := range t.fails {
+			if len(t.fails) < maxThrottleEntries*9/10 {
+				break
+			}
+			delete(t.fails, k)
 		}
 	}
 	f := t.fails[key]
@@ -182,6 +200,32 @@ func (t *throttle) reset(key string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.fails, key)
+}
+
+// clientNet is the unit the throttle counts per: the address for IPv4,
+// its /64 for IPv6 (one subscriber usually gets a whole /64).
+func clientNet(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.Unmap()
+	if a.Is4() {
+		return a.String()
+	}
+	p, _ := a.Prefix(64)
+	return p.String()
+}
+
+// acquireHash waits for a password-hashing slot, or for ctx to end (the
+// client gave up: don't spend CPU on it).
+func (s *Service) acquireHash(ctx context.Context) error {
+	select {
+	case s.hashing <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // TooManyAttemptsError carries how long to wait (for Retry-After).
@@ -203,12 +247,29 @@ func (s *Service) Login(ctx context.Context, name, pw, clientIP string) (string,
 		return "", store.SessionRecord{}, store.UserRecord{}, ErrBadCredentials
 	}
 	now := s.now()
-	name = strings.ToLower(strings.TrimSpace(name))
-	userKey, ipKey := "u:"+name, "ip:"+clientIP
-	if wait := max(s.throttle.blocked(userKey, maxFailsPerUser, now), s.throttle.blocked(ipKey, maxFailsPerIP, now)); wait > 0 {
+	netKey := "net:" + clientNet(clientIP)
+	name, err := NormalizeUserName(name)
+	if err != nil {
+		// No user can have this name, so don't record it per name: junk
+		// names (up to the body limit) would otherwise fill the table.
+		if wait := s.throttle.blocked(netKey, maxFailsPerNet, now); wait > 0 {
+			return "", store.SessionRecord{}, store.UserRecord{}, TooManyAttemptsError{Wait: wait}
+		}
+		s.throttle.fail(netKey, now)
+		return "", store.SessionRecord{}, store.UserRecord{}, ErrBadCredentials
+	}
+	userKey := "u:" + name
+	userNetKey := userKey + "|" + netKey
+	if wait := max(
+		s.throttle.blocked(userNetKey, maxFailsPerUserNet, now),
+		s.throttle.blocked(userKey, maxFailsPerUser, now),
+		s.throttle.blocked(netKey, maxFailsPerNet, now),
+	); wait > 0 {
 		return "", store.SessionRecord{}, store.UserRecord{}, TooManyAttemptsError{Wait: wait}
 	}
-	s.hashing <- struct{}{} // at most a few hashes at once: they are CPU-heavy
+	if err := s.acquireHash(ctx); err != nil { // few hashes at once: they are CPU-heavy
+		return "", store.SessionRecord{}, store.UserRecord{}, err
+	}
 	user, err := s.users.GetUser(ctx, name)
 	ok := false
 	switch {
@@ -222,11 +283,12 @@ func (s *Service) Login(ctx context.Context, name, pw, clientIP string) (string,
 	}
 	<-s.hashing
 	if !ok {
-		s.throttle.fail(userKey, now)
-		s.throttle.fail(ipKey, now)
+		for _, k := range []string{userNetKey, userKey, netKey} {
+			s.throttle.fail(k, now)
+		}
 		return "", store.SessionRecord{}, store.UserRecord{}, ErrBadCredentials
 	}
-	s.throttle.reset(userKey)
+	s.throttle.reset(userNetKey) // the per-name total stays: it counts others' guesses too
 
 	var secret [32]byte
 	rand.Read(secret[:])
@@ -267,12 +329,15 @@ func (s *Service) authenticateSession(ctx context.Context, token string) (Princi
 		return Principal{}, ErrUnauthenticated
 	}
 	if now.Sub(sess.LastSeen) > touchEvery {
-		if err := s.users.TouchSession(ctx, hash, now.UTC()); err != nil {
-			return Principal{}, fmt.Errorf("refresh session: %w", err)
-		}
+		// Best effort: if it can't be written (disk full), the session only
+		// times out a little sooner; failing the request would block even
+		// deletes, which must work on a full disk.
+		s.users.TouchSession(ctx, hash, now.UTC())
 	}
 	// The user's current scopes, so an admin's change applies at once.
-	p := Principal{KeyID: "user:" + user.Name, KeyName: user.Name, User: user.Name, SessionID: sess.ID, sessionHash: hash}
+	// KeyID includes the creation time so a later user with the same name
+	// doesn't inherit what this one created (share links' "creator").
+	p := Principal{KeyID: userKeyID(user), KeyName: user.Name, User: user.Name, SessionID: sess.ID, sessionHash: hash}
 	for _, raw := range user.Scopes {
 		sc, err := ParseScope(raw)
 		if err != nil {
@@ -281,6 +346,10 @@ func (s *Service) authenticateSession(ctx context.Context, token string) (Princi
 		p.Scopes = append(p.Scopes, sc)
 	}
 	return p, nil
+}
+
+func userKeyID(u store.UserRecord) string {
+	return "user:" + u.Name + "@" + strconv.FormatInt(u.Created.UnixNano(), 36)
 }
 
 // Logout ends the caller's own session.
@@ -370,11 +439,13 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, p Principal, current, n
 		return err
 	}
 	now := s.now()
-	key := "u:" + p.User
-	if wait := s.throttle.blocked(key, maxFailsPerUser, now); wait > 0 {
+	key := "pw:" + p.User
+	if wait := s.throttle.blocked(key, maxFailsOwnPw, now); wait > 0 {
 		return TooManyAttemptsError{Wait: wait}
 	}
-	s.hashing <- struct{}{}
+	if err := s.acquireHash(ctx); err != nil {
+		return err
+	}
 	ok := passwordMatches(user.PasswordHash, current)
 	<-s.hashing
 	if !ok {

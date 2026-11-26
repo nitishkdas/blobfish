@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -35,6 +36,10 @@ func TestCrashPoints(t *testing.T) {
 		{point: "put:renamed", hasOld: true},
 		{point: "put:committed", hasOld: false, wantNew: true},
 		{point: "put:committed", hasOld: true, wantNew: true},
+		// bbolt reported a commit error but the record reached disk: the
+		// blob must still be there (deleting it would lose the object).
+		{point: "put:commit-uncertain", hasOld: false, wantNew: true},
+		{point: "put:commit-uncertain", hasOld: true, wantNew: true},
 		{point: "delete:committed", hasOld: true, isDelete: true},
 	}
 	for _, tt := range tests {
@@ -68,7 +73,7 @@ func TestCrashPoints(t *testing.T) {
 			} else {
 				_, err = e.Put(ctx, testBucket, "k", strings.NewReader(newBody), store.Meta{})
 			}
-			if !fired || err != errSimulatedCrash {
+			if !fired || !errors.Is(err, errSimulatedCrash) {
 				t.Fatalf("crash point %q did not fire (err=%v)", tt.point, err)
 			}
 			e.Close() // the "process" is gone; only the disk remains

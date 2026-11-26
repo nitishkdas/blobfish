@@ -52,7 +52,7 @@ func TestUsersAPI(t *testing.T) {
 	tok := a.login("ANN", "long enough pw")
 	var me whoamiResponse
 	json.Unmarshal(a.must(http.StatusOK, "GET", "/v1/whoami", tok, nil).Body.Bytes(), &me)
-	if me.User != "ann" || me.KeyID != "user:ann" || len(me.Scopes) != 1 || me.Scopes[0] != "docs:rw" {
+	if me.User != "ann" || !strings.HasPrefix(me.KeyID, "user:ann@") || len(me.Scopes) != 1 || me.Scopes[0] != "docs:rw" {
 		t.Fatalf("whoami = %+v", me)
 	}
 	a.must(http.StatusOK, "PUT", "/v1/b/docs/a.txt", tok, strings.NewReader("hi"))
@@ -75,6 +75,7 @@ func TestUsersAPI(t *testing.T) {
 	a.must(http.StatusBadRequest, "PATCH", "/v1/users/ann", a.admin, strings.NewReader(`{"scopes":["docs:rw"],"password":"short"}`))
 	a.must(http.StatusForbidden, "PUT", "/v1/b/docs/b.txt", tok, strings.NewReader("hi"))
 	a.must(http.StatusNotFound, "PATCH", "/v1/users/ghost", a.admin, strings.NewReader(`{"scopes":["docs:r"]}`))
+	a.must(http.StatusOK, "PATCH", "/v1/users/ANN", a.admin, strings.NewReader(`{"scopes":["other:rw"]}`)) // names are case-insensitive
 
 	// Own password change: wrong current refused; this session survives,
 	// others end.

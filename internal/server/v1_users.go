@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
@@ -155,7 +156,7 @@ func (a *api) updateUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	name := r.PathValue("name")
+	name := strings.ToLower(r.PathValue("name")) // names are stored lowercase
 	var req struct {
 		Password *string   `json:"password"`
 		Scopes   *[]string `json:"scopes"`
@@ -201,7 +202,7 @@ func (a *api) deleteUser(w http.ResponseWriter, r *http.Request) {
 	if _, ok := a.authorize(w, r, serverWide, auth.PermAdmin); !ok {
 		return
 	}
-	name := r.PathValue("name")
+	name := strings.ToLower(r.PathValue("name")) // names are stored lowercase
 	if err := a.auth.DeleteUser(r.Context(), name); err != nil {
 		a.fail(w, r, err)
 		return
@@ -215,7 +216,7 @@ func (a *api) signOutUser(w http.ResponseWriter, r *http.Request) {
 	if _, ok := a.authorize(w, r, serverWide, auth.PermAdmin); !ok {
 		return
 	}
-	name := r.PathValue("name")
+	name := strings.ToLower(r.PathValue("name")) // names are stored lowercase
 	n, err := a.auth.SignOutUser(r.Context(), name)
 	if err != nil {
 		a.fail(w, r, err)

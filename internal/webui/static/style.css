@@ -22,7 +22,6 @@
   --danger: light-dark(#dc2626, #f87171);
   --danger-soft: light-dark(#fef2f2, #2a1414);
   --row-hover: light-dark(#f8f8f9, #18181c);
-  --selected: light-dark(#f0f0f2, #222227);
   --radius: 10px;
   --radius-sm: 7px;
   --shadow-1: light-dark(rgb(16 16 20 / .05), rgb(0 0 0 / .4));

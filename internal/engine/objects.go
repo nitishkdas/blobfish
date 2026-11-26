@@ -152,7 +152,9 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 	}
 	var oldBlob string
 	var queued bool
-	err = e.db.Update(func(tx *bbolt.Tx) error {
+	var refused error // set when our own checks reject the commit
+	err = e.db.Update(func(tx *bbolt.Tx) (err error) {
+		defer func() { refused = err }()
 		objs, err := objectsOf(tx, bucket)
 		if err != nil {
 			return err
@@ -189,8 +191,17 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 		queued, err = e.queueEvent(tx, ev, "")
 		return err
 	})
+	if err == nil && e.crashAt("put:commit-uncertain") {
+		err = errSimulatedCrash // the commit reached disk but reported an error
+	}
 	if err != nil {
-		os.Remove(final)
+		// A refused commit (quota, name taken, bucket gone) wrote nothing,
+		// so the blob can go. If bbolt itself failed (an I/O error while
+		// committing), the record may be on disk anyway: keep the blob and
+		// let the janitor delete it only if nothing references it.
+		if refused != nil {
+			os.Remove(final)
+		}
 		return store.ObjectInfo{}, fmt.Errorf("commit %s/%s: %w", bucket, key, err)
 	}
 	if queued {

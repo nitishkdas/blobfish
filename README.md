@@ -50,8 +50,10 @@ admin.
 
 Sessions end after 12 hours without use and after 7 days at most. Changing
 a password signs that user out everywhere else; admins can also sign a
-user out everywhere. Repeated wrong passwords are slowed down (10 per user
-name and 30 per address per 15 minutes). Passwords are stored as
+user out everywhere. Repeated wrong passwords are slowed down: per 15 minutes,
+10 per user name from one network, 100 per user name in all, and 30 per
+network (IPv6 counts per /64). Someone guessing your name from elsewhere
+can't lock you out. Passwords are stored as
 PBKDF2-SHA256 hashes (600,000 rounds).
 
 Forgot the password and no admin can sign in? Stop the server and run

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -116,7 +117,7 @@ func TestLoginAndSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.User != "alice" || p.KeyID != "user:alice" || !p.Can(PermWrite, "invoices", "") || p.Can(PermRead, "other", "") {
+	if p.User != "alice" || !strings.HasPrefix(p.KeyID, "user:alice@") || !p.Can(PermWrite, "invoices", "") || p.Can(PermRead, "other", "") {
 		t.Fatalf("principal = %+v", p)
 	}
 
@@ -232,32 +233,144 @@ func TestLoginThrottle(t *testing.T) {
 	ctx := context.Background()
 	s, clock := newUserService(t)
 	s.CreateUser(ctx, "carol", "carols password", []string{"*:r"})
+	login := func(pw, ip string) error {
+		_, _, _, err := s.Login(ctx, "carol", pw, ip)
+		return err
+	}
 
-	// Per user: after maxFailsPerUser misses, even the right password waits.
-	for i := range maxFailsPerUser {
-		if _, _, _, err := s.Login(ctx, "carol", "guess", "10.0.0."+string(rune('a'+i))); !errors.Is(err, ErrBadCredentials) {
+	// One network guessing carol's password gets blocked after
+	// maxFailsPerUserNet, even with the right password...
+	for i := range maxFailsPerUserNet {
+		if err := login("guess guess", "10.0.0.1"); !errors.Is(err, ErrBadCredentials) {
 			t.Fatalf("attempt %d: %v", i, err)
 		}
 	}
-	_, _, _, err := s.Login(ctx, "carol", "carols password", "10.9.9.9")
 	var tm TooManyAttemptsError
-	if !errors.As(err, &tm) || tm.Wait <= 0 || tm.Wait > throttleWindow {
-		t.Fatalf("after %d misses: err = %v", maxFailsPerUser, err)
+	if err := login("carols password", "10.0.0.1"); !errors.As(err, &tm) || tm.Wait <= 0 || tm.Wait > throttleWindow {
+		t.Fatalf("after %d misses: err = %v", maxFailsPerUserNet, err)
+	}
+	// ...but carol herself, elsewhere, can still sign in (no lockout).
+	if err := login("carols password", "192.0.2.7"); err != nil {
+		t.Fatalf("carol locked out by someone else's guesses: %v", err)
 	}
 	*clock = clock.Add(throttleWindow)
-	if _, _, _, err := s.Login(ctx, "carol", "carols password", "10.9.9.9"); err != nil {
-		t.Fatalf("still blocked after the window: %v", err)
+
+	// A distributed attack on one name stops at maxFailsPerUser overall.
+	for i := range maxFailsPerUser {
+		login("guess guess", fmt.Sprintf("10.1.%d.%d", i/250, i%250))
+	}
+	if err := login("carols password", "198.51.100.1"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("name not throttled after %d misses from many networks: %v", maxFailsPerUser, err)
+	}
+	*clock = clock.Add(throttleWindow)
+
+	// One network spraying many names is stopped too.
+	for i := range maxFailsPerNet {
+		s.Login(ctx, fmt.Sprintf("user%d", i), "guess guess", "6.6.6.6")
+	}
+	if err := login("carols password", "6.6.6.6"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("network not throttled: %v", err)
 	}
 
-	// Per IP: one address spraying many names is stopped too.
-	for i := range maxFailsPerIP {
-		s.Login(ctx, "user"+string(rune('a'+i%26))+string(rune('a'+i/26)), "guess", "6.6.6.6")
+	// IPv6 counts per /64: rotating addresses inside it doesn't help.
+	*clock = clock.Add(throttleWindow)
+	for i := range maxFailsPerNet {
+		s.Login(ctx, fmt.Sprintf("user%d", i), "guess guess", fmt.Sprintf("2001:db8:1:2::%x", i+1))
 	}
-	if _, _, _, err := s.Login(ctx, "carol", "carols password", "6.6.6.6"); !errors.Is(err, ErrTooManyAttempts) {
-		t.Fatalf("IP not throttled: %v", err)
+	if err := login("carols password", "2001:db8:1:2:ffff::9"); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("same /64 not throttled: %v", err)
 	}
-	if _, _, _, err := s.Login(ctx, "carol", "carols password", "7.7.7.7"); err != nil {
-		t.Fatalf("another IP was blocked: %v", err)
+	if err := login("carols password", "2001:db8:1:3::1"); err != nil {
+		t.Fatalf("another /64 was blocked: %v", err)
+	}
+}
+
+func TestThrottleTableStaysSmall(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newUserService(t)
+	// Junk names (impossible formats, huge) are never stored per name.
+	long := strings.Repeat("x", 60_000)
+	for i := range 50 {
+		s.Login(ctx, long+fmt.Sprint(i), "pw", fmt.Sprintf("10.9.0.%d", i))
+	}
+	s.throttle.mu.Lock()
+	for k := range s.throttle.fails {
+		if len(k) > 200 {
+			t.Errorf("throttle key of %d bytes stored", len(k))
+		}
+	}
+	s.throttle.mu.Unlock()
+	// A flood of fresh keys within one window stays under the cap.
+	now := s.now()
+	for i := range 3 * maxThrottleEntries {
+		s.throttle.fail(fmt.Sprintf("net:k%d", i), now)
+	}
+	if n := len(s.throttle.fails); n > maxThrottleEntries {
+		t.Errorf("throttle table grew to %d entries, cap %d", n, maxThrottleEntries)
+	}
+}
+
+func TestClientNet(t *testing.T) {
+	for in, want := range map[string]string{
+		"203.0.113.5":          "203.0.113.5",
+		"::ffff:203.0.113.5":   "203.0.113.5",
+		"2001:db8:a:b:c:d:e:f": "2001:db8:a:b::/64",
+		"2001:db8:a:b::1":      "2001:db8:a:b::/64",
+		"not an ip":            "not an ip",
+	} {
+		if got := clientNet(in); got != want {
+			t.Errorf("clientNet(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A request whose client gave up doesn't wait for a hashing slot.
+func TestLoginGivesUpWhenCancelled(t *testing.T) {
+	s, _ := newUserService(t)
+	for range cap(s.hashing) {
+		s.hashing <- struct{}{} // all slots busy
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, _, _, err := s.Login(ctx, "anyone", "some password", "1.1.1.1"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the context's error", err)
+	}
+}
+
+// failingTouch is a store whose LastSeen writes fail (a full disk).
+type failingTouch struct{ store.Users }
+
+func (failingTouch) TouchSession(context.Context, string, time.Time) error {
+	return errors.New("no space left on device")
+}
+
+func TestSessionWorksWhenLastSeenCantBeWritten(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newUserService(t)
+	s.CreateUser(ctx, "fay", "fays password", []string{"*:rw"})
+	tok, _, _, _ := s.Login(ctx, "fay", "fays password", "1.1.1.1")
+	s.users = failingTouch{s.users}
+	*clock = clock.Add(touchEvery + time.Minute) // due for a LastSeen write
+	if _, err := authAs(t, s, tok); err != nil {
+		t.Fatalf("request failed because LastSeen couldn't be saved: %v", err)
+	}
+}
+
+// A new user with a deleted user's name doesn't get their identity
+// (KeyID is what share links record as their creator).
+func TestRecreatedUserIsADifferentPrincipal(t *testing.T) {
+	ctx := context.Background()
+	s, clock := newUserService(t)
+	s.CreateUser(ctx, "gus", "first gus password", []string{"*:r"})
+	tok, _, _, _ := s.Login(ctx, "gus", "first gus password", "1.1.1.1")
+	first, _ := authAs(t, s, tok)
+	s.DeleteUser(ctx, "gus")
+	*clock = clock.Add(time.Second)
+	s.CreateUser(ctx, "gus", "second gus password", []string{"*:r"})
+	tok, _, _, _ = s.Login(ctx, "gus", "second gus password", "1.1.1.1")
+	second, _ := authAs(t, s, tok)
+	if !strings.HasPrefix(first.KeyID, "user:gus@") || first.KeyID == second.KeyID {
+		t.Errorf("KeyIDs %q and %q", first.KeyID, second.KeyID)
 	}
 }
 
