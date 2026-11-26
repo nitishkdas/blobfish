@@ -64,6 +64,11 @@ func TestLoad(t *testing.T) {
 		{name: "bad log level", env: map[string]string{"BLOBFISH_LOG_LEVEL": "loud"}, wantErr: "log_level"},
 		{name: "bad log format", file: `{"log_format": "xml"}`, wantErr: "log_format"},
 		{name: "empty listen", file: `{"listen": ""}`, wantErr: "listen"},
+		{name: "trash from file", file: `{"trash_days": 30}`, want: func(c Config) Config { c.TrashDays = 30; return c }},
+		{name: "trash off by env", env: map[string]string{"BLOBFISH_TRASH_DAYS": "0"}, want: func(c Config) Config { c.TrashDays = 0; return c }},
+		{name: "negative trash", file: `{"trash_days": -1}`, wantErr: "trash_days"},
+		{name: "huge trash", env: map[string]string{"BLOBFISH_TRASH_DAYS": "99999"}, wantErr: "trash_days"},
+		{name: "bad trash env", env: map[string]string{"BLOBFISH_TRASH_DAYS": "7d"}, wantErr: "BLOBFISH_TRASH_DAYS"},
 		{
 			name: "public url",
 			env:  map[string]string{"BLOBFISH_PUBLIC_URL": "https://files.example.com"},

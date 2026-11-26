@@ -34,7 +34,12 @@ type testAPI struct {
 
 func newTestAPI(t *testing.T) *testAPI {
 	t.Helper()
-	eng, err := engine.Open(t.TempDir(), engine.Options{})
+	return newTestAPIWith(t, engine.Options{})
+}
+
+func newTestAPIWith(t *testing.T, opts engine.Options) *testAPI {
+	t.Helper()
+	eng, err := engine.Open(t.TempDir(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +56,7 @@ func newTestAPI(t *testing.T) *testAPI {
 		Buckets:       eng,
 		Auth:          svc,
 		Links:         eng,
+		Trash:         eng,
 		PublicURL:     "https://files.example.com",
 	})
 	return &testAPI{t: t, h: h, auth: svc, eng: eng, admin: admin}

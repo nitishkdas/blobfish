@@ -58,6 +58,43 @@ type Links interface {
 	DeleteLink(ctx context.Context, id string) error
 }
 
+// Trash keeps deleted objects for a while so they can be restored. While
+// an object is in trash, its share links don't work; restoring it brings
+// them back.
+type Trash interface {
+	// TrashRetention is how long a deleted object is kept; 0 means trash
+	// is off and Delete removes objects at once.
+	TrashRetention() time.Duration
+	// ListTrash lists one bucket's trash, most recently deleted first.
+	ListTrash(ctx context.Context, bucket string, opts TrashListOptions) (TrashList, error)
+	// RestoreTrash puts a trashed object back under its key. It fails with
+	// ErrKeyExists if another object has that key now.
+	RestoreTrash(ctx context.Context, bucket, id string) (ObjectInfo, error)
+	// PurgeTrash deletes one trashed object for good, or the bucket's
+	// whole trash when id is empty.
+	PurgeTrash(ctx context.Context, bucket, id string) error
+}
+
+// TrashItem is one deleted object waiting in trash.
+type TrashItem struct {
+	ID      string
+	Object  ObjectInfo
+	Deleted time.Time
+	PurgeAt time.Time // when it is deleted for good
+}
+
+// TrashListOptions pages through a bucket's trash.
+type TrashListOptions struct {
+	Cursor string // NextCursor of the previous page
+	Limit  int    // 0 = DefaultListLimit
+}
+
+// TrashList is one page of trash.
+type TrashList struct {
+	Items      []TrashItem
+	NextCursor string
+}
+
 // LinkRecord is a stored share link. The token is kept as-is (not hashed
 // like API keys) so the UI can show a link again; anyone able to read the
 // metadata file can read the object files on the same disk anyway.
@@ -75,6 +112,10 @@ type LinkRecord struct {
 	// the last part of the key. Older binaries ignore it (they fall back
 	// to the key), so adding it needed no format version bump.
 	Filename string `json:"filename,omitempty"`
+	// Trashed is the trash ID of the deleted object this link points to;
+	// set, the link does not work until the object is restored. Kept per
+	// link so a new upload to the same key never revives old links.
+	Trashed string `json:"trashed,omitempty"`
 }
 
 // HealthChecker runs a self-check of the data store.
@@ -203,6 +244,10 @@ var (
 	ErrNoSuchAPIKey      = errors.New("API key not found")
 	ErrNoSuchLink        = errors.New("share link not found")
 	ErrInvalidOrigin     = errors.New("invalid web origin")
+	ErrNoSuchTrashItem   = errors.New("object not found in trash")
+	// ErrKeyExists: a trashed object can't be restored because another
+	// object has its key now.
+	ErrKeyExists = errors.New("an object with this key already exists")
 	// ErrInsufficientStorage: accepting the upload would cut into the free
 	// space reserve kept so deletes and metadata updates always fit.
 	ErrInsufficientStorage = errors.New("not enough free disk space")

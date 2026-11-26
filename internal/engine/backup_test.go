@@ -189,7 +189,7 @@ func TestRestoreRejects(t *testing.T) {
 		{"missing meta.db", rewriteTar(t, good, func(h *tar.Header, b []byte) ([]byte, bool) { return b, h.Name != "meta.db" }), nil, "incomplete"},
 		{"newer format", rewriteTar(t, good, func(h *tar.Header, b []byte) ([]byte, bool) {
 			if h.Name == "manifest.json" {
-				return bytes.Replace(b, []byte(`"format":1`), []byte(`"format":99`), 1), true
+				return bytes.Replace(b, []byte(fmt.Sprintf(`"format":%d`, FormatVersion)), []byte(`"format":99`), 1), true
 			}
 			return b, true
 		}), nil, "newer BlobFish"},

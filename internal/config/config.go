@@ -47,10 +47,21 @@ type Config struct {
 	// MinFreeSpace is disk space, in bytes, that uploads may never use, so
 	// deletes and metadata updates always fit. 0 disables the check.
 	MinFreeSpace int64 `json:"min_free_space"`
+	// TrashDays keeps deleted objects restorable for this many days before
+	// they are deleted for good. 0 turns trash off.
+	TrashDays int `json:"trash_days"`
 	// TrustedProxies lists reverse proxies (addresses or CIDR ranges) whose
 	// X-Forwarded-For / X-Forwarded-Proto headers are believed, e.g.
 	// ["127.0.0.1"] when Caddy runs on the same machine.
 	TrustedProxies []string `json:"trusted_proxies"`
+}
+
+// MaxTrashDays caps trash_days (ten years).
+const MaxTrashDays = 3650
+
+// TrashRetention is TrashDays as a duration; 0 means trash is off.
+func (c Config) TrashRetention() time.Duration {
+	return time.Duration(c.TrashDays) * 24 * time.Hour
 }
 
 // Duration is a time.Duration written as a string like "60s" or "2m" in
@@ -82,6 +93,7 @@ func Default() Config {
 		TransferIdleTimeout: Duration(60 * time.Second),
 		MaxConnections:      1000,
 		MinFreeSpace:        512 << 20, // 512 MiB
+		TrashDays:           7,
 	}
 }
 
@@ -165,6 +177,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		}
 		cfg.MinFreeSpace = n
 	}
+	if v := getenv("BLOBFISH_TRASH_DAYS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("BLOBFISH_TRASH_DAYS: %w", err)
+		}
+		cfg.TrashDays = n
+	}
 	if v := getenv("BLOBFISH_MAX_CONNECTIONS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -208,6 +227,9 @@ func (c Config) Validate() error {
 	}
 	if c.MinFreeSpace < 0 {
 		return fmt.Errorf("config: min_free_space must be 0 or more bytes, got %d", c.MinFreeSpace)
+	}
+	if c.TrashDays < 0 || c.TrashDays > MaxTrashDays {
+		return fmt.Errorf("config: trash_days must be 0 (off) to %d, got %d", MaxTrashDays, c.TrashDays)
 	}
 	if c.MaxConnections < 1 {
 		return fmt.Errorf("config: max_connections must be at least 1, got %d", c.MaxConnections)

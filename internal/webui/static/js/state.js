@@ -4,7 +4,7 @@ export const PAGE_SIZES = [50, 100, 200];
 
 export const state = {
   // Who is signed in, from GET /v1/whoami.
-  me: { name: "", scopes: [], maxObjectSize: 0 },
+  me: { name: "", scopes: [], maxObjectSize: 0, trashDays: 0 },
   buckets: [],
 
   // Current route (see router.js).
@@ -20,6 +20,9 @@ export const state = {
   },
 
   apiKeys: [],
+
+  // The trash on screen (trash.js), newest first.
+  trash: { bucket: null, items: [], nextCursor: "", loaded: false },
 
   // Upload queue, shown in the docked panel. Jobs run one at a time and
   // remember their own bucket, so browsing elsewhere doesn't disturb them.

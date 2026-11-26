@@ -15,6 +15,7 @@ import (
 type JanitorStats struct {
 	TmpRemoved   int
 	BlobsRemoved int
+	TrashPurged  int // trashed objects past their retention
 }
 
 // RunJanitor deletes files a crash or failed cleanup left behind:
@@ -25,6 +26,14 @@ type JanitorStats struct {
 // It is safe to run while the engine serves requests.
 func (e *Engine) RunJanitor(ctx context.Context) (JanitorStats, error) {
 	var st JanitorStats
+
+	// First, so the blob files it frees are removed below if a crash or a
+	// running backup kept them.
+	n, err := e.PurgeExpiredTrash(ctx)
+	if err != nil {
+		return st, err
+	}
+	st.TrashPurged = n
 
 	tmps, err := os.ReadDir(e.tmpDir)
 	if err != nil {

@@ -375,3 +375,7 @@ dialog[open] { animation: dialog-in .14s ease-out; }
   .main { padding: 12px 16px calc(32px + var(--dock-space, 0px)); }
   td.when, th.when { display: none; }
 }
+
+/* Trash */
+.trash-note { margin: 0 0 12px; font-size: 13px; }
+.trash-name { word-break: break-all; }

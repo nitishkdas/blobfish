@@ -250,13 +250,18 @@ func (e *Engine) Delete(ctx context.Context, bucket, key string) error {
 		if err != nil {
 			return err
 		}
-		blob = rec.Blob
 		if err := objs.Delete([]byte(key)); err != nil {
 			return err
 		}
+		if e.trashRetention > 0 {
+			// The blob stays (and stays indexed) until the trash is purged.
+			return e.moveToTrash(tx, bucket, key, rec)
+		}
+		blob = rec.Blob
 		// Same transaction: a later upload to this key must not quietly
-		// revive old share links.
-		if err := deleteLinksWithPrefix(tx, linkIdxPrefix(bucket, key)); err != nil {
+		// revive old share links. Links of an earlier copy still in trash
+		// (Trashed set) stay with it.
+		if err := deleteTrashedLinks(tx, bucket, key, ""); err != nil {
 			return err
 		}
 		return tx.Bucket(bktBlobs).Delete([]byte(blob))

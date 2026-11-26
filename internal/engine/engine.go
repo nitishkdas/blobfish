@@ -5,7 +5,8 @@
 //
 //	meta.db              bbolt: "buckets", "objects/<bucket>/<key>", "blobs/<id>",
 //	                     "keys/<token hash>", "settings",
-//	                     "links/<token>", "linkidx/<bucket>\x00<key>\x00<id>" -> token
+//	                     "links/<token>", "linkidx/<bucket>\x00<key>\x00<id>" -> token,
+//	                     "trash/<bucket>/<trash id>" (deleted objects, see trash.go)
 //	objects/ab/cd/<id>   object bytes, random 32-hex-char IDs
 //	tmp/                 uploads in progress
 //
@@ -58,6 +59,9 @@ type Options struct {
 	// MinFreeBytes is free disk space uploads may never eat into, so
 	// deletes and metadata commits always have room. 0 disables the check.
 	MinFreeBytes int64
+	// TrashRetention keeps deleted objects restorable for this long before
+	// they are purged. 0 turns trash off: Delete removes at once.
+	TrashRetention time.Duration
 }
 
 // Engine stores objects in a data directory. It is safe for concurrent use.
@@ -70,6 +74,7 @@ type Engine struct {
 	now                 func() time.Time
 	presignSecret       []byte
 	minFree             int64
+	trashRetention      time.Duration
 	// freeSpace reports free bytes on the data disk; tests replace it.
 	freeSpace func() (uint64, error)
 
@@ -134,6 +139,8 @@ func Open(dir string, opts Options) (*Engine, error) {
 		now:      func() time.Time { return time.Now().UTC() },
 		inflight: make(map[string]struct{}),
 		minFree:  opts.MinFreeBytes,
+
+		trashRetention: opts.TrashRetention,
 	}
 	e.freeSpace = func() (uint64, error) { return diskFree(dir) }
 	for _, d := range []string{dir, e.objDir, e.tmpDir} {
@@ -153,7 +160,7 @@ func Open(dir string, opts Options) (*Engine, error) {
 	}
 	var formatBefore int
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx} {
+		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx, bktTrash} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
@@ -187,6 +194,9 @@ func Open(dir string, opts Options) (*Engine, error) {
 	}
 	if stats.TmpRemoved+stats.BlobsRemoved > 0 {
 		log.Info("removed leftovers from an earlier run", "tmp_files", stats.TmpRemoved, "orphan_blobs", stats.BlobsRemoved)
+	}
+	if stats.TrashPurged > 0 {
+		log.Info("purged expired trash", "objects", stats.TrashPurged)
 	}
 	return e, nil
 }

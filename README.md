@@ -55,6 +55,14 @@ curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","method":"GET
 # Permanent link that anyone can open until you revoke it (expiresIn 0 = never):
 curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","expiresIn":0}' localhost:8080/v1/links
 
+# Same link, but the browser saves it as "Invoice 7.pdf" (add ?download to any
+# object, presigned or share-link URL to force a download):
+curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","filename":"Invoice 7.pdf"}' localhost:8080/v1/links
+
+# Deleted by mistake? Deletes go to the bucket's trash for 7 days:
+curl -H "$H" localhost:8080/v1/trash/invoices                      # list, newest first
+curl -X POST -H "$H" localhost:8080/v1/trash/invoices/<id>/restore  # put it back
+
 # Serve a whole bucket's files without a key (e.g. website assets):
 curl -X PATCH -H "$H" -d '{"public":true}' localhost:8080/v1/buckets/site-assets
 ```
@@ -150,6 +158,7 @@ See `blobfish.example.json`.
 | `transfer_idle_timeout` (drop a transfer with no progress for this long) | `BLOBFISH_TRANSFER_IDLE_TIMEOUT` | `60s` |
 | `max_connections` (extra clients wait in the accept queue) | `BLOBFISH_MAX_CONNECTIONS` | `1000` |
 | `min_free_space` (bytes uploads never use, so deletes always fit; 0 = off) | `BLOBFISH_MIN_FREE_SPACE` | `536870912` (512 MiB) |
+| `trash_days` (deleted files stay restorable this long; 0 = delete at once) | `BLOBFISH_TRASH_DAYS` | `7` |
 | `trusted_proxies` (reverse proxies whose `X-Forwarded-For`/`-Proto` are believed) | `BLOBFISH_TRUSTED_PROXIES` (comma-separated) | none |
 
 ## License

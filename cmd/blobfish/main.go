@@ -76,7 +76,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 
 	// Open runs the janitor once, so leftovers from a crash are gone before
 	// the first request.
-	eng, err := engine.Open(cfg.DataDir, engine.Options{Logger: log, MinFreeBytes: cfg.MinFreeSpace})
+	eng, err := engine.Open(cfg.DataDir, engine.Options{
+		Logger: log, MinFreeBytes: cfg.MinFreeSpace, TrashRetention: cfg.TrashRetention(),
+	})
 	if err != nil {
 		return err
 	}
@@ -122,6 +124,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			Buckets:        eng,
 			Auth:           authSvc,
 			Links:          eng,
+			Trash:          eng,
 			Backup:         eng,
 			Health:         eng,
 			Version:        version,

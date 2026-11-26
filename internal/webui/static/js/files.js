@@ -93,6 +93,10 @@ export function renderFiles() {
         icon("globe", 14), "Public"),
       corsChip(r.bucket),
       h("div", { class: "toolbar-actions" },
+        canWrite && !r.prefix && h("button", {
+          class: "link with-icon", title: "Deleted files you can still restore",
+          onclick: () => navigate({ view: "trash", bucket: r.bucket }),
+        }, icon("trash"), "Trash"),
         canWrite && h("button", { class: "with-icon", onclick: newFolder }, icon("folderPlus"), "New folder"),
         canWrite && h("button", { class: "with-icon", onclick: () => pickAndUpload({ folder: true }) }, icon("folder"), "Upload folder"),
         canWrite && h("button", { class: "primary with-icon", onclick: () => pickAndUpload({ folder: false }) }, icon("upload"), "Upload"),
@@ -438,15 +442,18 @@ function showDetails(o) {
 }
 
 async function deleteObject(o) {
+  const days = state.me.trashDays;
   const ok = await confirmDialog({
-    title: "Delete this file?",
-    body: [h("p", { class: "mono confirm-target" }, o.key), "This can't be undone."],
-    confirmLabel: "Delete",
+    title: days > 0 ? "Move this file to trash?" : "Delete this file?",
+    body: [h("p", { class: "mono confirm-target" }, o.key), days > 0
+      ? `You can restore it from the bucket's trash for ${days} day${days === 1 ? "" : "s"}. Its share links stop working until then.`
+      : "This can't be undone."],
+    confirmLabel: days > 0 ? "Move to trash" : "Delete",
   });
   if (!ok) return;
   try {
     await api("DELETE", objectPath(state.route.bucket, o.key));
-    toast("Deleted");
+    toast(days > 0 ? "Moved to trash" : "Deleted");
     reload();
   } catch (err) { showError(err); }
 }
@@ -480,7 +487,7 @@ async function deleteBucket() {
   const bucket = state.route.bucket;
   const ok = await confirmDialog({
     title: `Delete bucket “${bucket}”?`,
-    body: ["Only an empty bucket can be deleted. This can't be undone."],
+    body: ["Only an empty bucket can be deleted, with an empty trash. This can't be undone."],
     confirmLabel: "Delete bucket",
   });
   if (!ok) return;

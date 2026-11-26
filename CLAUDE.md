@@ -86,25 +86,27 @@ All endpoints under `/v1`, `Authorization: Bearer <key>`, JSON for everything ex
 | Method | Path | Does |
 | --- | --- | --- |
 | PUT | `/v1/buckets/{bucket}` | Create bucket (admin) |
-| DELETE | `/v1/buckets/{bucket}` | Delete bucket (must be empty) |
+| DELETE | `/v1/buckets/{bucket}` | Delete bucket (must be empty, trash included) |
 | PATCH | `/v1/buckets/{bucket}` | `{"public": true\|false}` and/or `{"corsOrigins": [...]}` (bucket admin). Public: object GET/HEAD work without a key; listing/writes still need one. corsOrigins: sites whose web pages may call this bucket from a browser |
 | GET | `/v1/buckets` | List buckets |
 | PUT | `/v1/b/{bucket}/{key...}` | Upload object (raw body; Content-Type stored; optional `X-Meta-*`) |
 | GET | `/v1/b/{bucket}/{key...}` | Download (supports `Range`, `If-None-Match`) |
 | HEAD | `/v1/b/{bucket}/{key...}` | Object info |
-| DELETE | `/v1/b/{bucket}/{key...}` | Delete (idempotent) |
+| DELETE | `/v1/b/{bucket}/{key...}` | Delete (idempotent); goes to trash when `trash_days` > 0 |
 | GET | `/v1/b/{bucket}?prefix=&delimiter=/&cursor=&limit=` | List objects, paginated |
 | POST | `/v1/presign` | Presigned URL (bucket, key, method GET/PUT, expiry seconds) |
 | POST/GET/DELETE | `/v1/links`, `/v1/links/{id}` | Share links: create (read access; `expiresIn` 0 = never), list per object/bucket, revoke (creator or bucket writer) |
 | GET | `/s/{token}[/{name}]` | Serve a share link, no key. 404 `NoSuchLink` if revoked/deleted, 410 `LinkExpired` |
-| GET | `/v1/whoami` | Key id, name, scopes, max object size (drives the web UI) |
+| GET/DELETE | `/v1/trash/{bucket}` | List trash, newest first (`cursor`, `limit`) / empty it (bucket write) |
+| POST/DELETE | `/v1/trash/{bucket}/{id}[/restore]` | Restore (409 `KeyExists` if the key is taken) / delete one forever (bucket write) |
+| GET | `/v1/whoami` | Key id, name, scopes, max object size, trash days (drives the web UI) |
 | GET | `/v1/backup` | Consistent tar snapshot of everything (`*:admin`), streamed while the server runs |
 | POST/GET/DELETE | `/v1/keys` | Manage API keys (admin) |
 | GET | `/v1/status` | Version, data format, uptime, disk free/reserve, request counts by class, bytes in/out (`*:admin`) |
 | GET | `/healthz` | Self-check, no auth: reads metadata, writes+fsyncs a probe file, measures space. 503 `unavailable` if metadata or disk fail; 200 `degraded` when space is at the reserve. Only ok/failing per check, no details |
 
 - **API keys**: random 32-byte tokens, only SHA-256 hash stored. Scopes like `invoices:rw`, `*:admin`.
-- **Share links** live in bbolt (`links`, `linkidx`), token stored as-is so the UI can re-show links. Deleting an object deletes its links in the same transaction (a re-upload never revives them); overwriting keeps them.
+- **Share links** live in bbolt (`links`, `linkidx`), token stored as-is so the UI can re-show links. Deleting an object (trash off) or purging it from trash deletes its links in the same transaction; with trash on, delete sets `LinkRecord.Trashed` to the trash ID instead, so the link 404s, a re-upload never revives it, and only restoring that same trash entry clears it. Overwriting keeps links. Optional `filename` per link; `?download[=name]` on object/link GETs sends `Content-Disposition: attachment` (`internal/server/disposition.go`).
 - **Caching**: object responses send `Cache-Control: private, no-cache` (`public, no-cache` for anonymous public reads) so revocation and public→private apply immediately; ETag makes revalidation a cheap 304.
 - **Presigned URLs**: query params `exp` + `sig`, where `sig = hex(HMAC-SHA256(server_secret, method NUL bucket NUL key NUL exp NUL))`. NUL separators keep it unambiguous (keys may contain anything but NUL). HEAD may use a GET signature. Max expiry 7 days. Server checks signature, then expiry; no key needed. The secret is generated once and stored in `meta.db` `settings`.
 - **Errors**: one shape everywhere, stable codes:
@@ -129,9 +131,9 @@ All endpoints under `/v1`, `Authorization: Bearer <key>`, JSON for everything ex
 
 ### Feature roadmap (agreed 2026-11-26, built in this order)
 
-1. **Download names**: optional `filename` per share link; `?download[=name]` on object and link GETs forces a save (`attachment`).
-2. **`blobfish verify`**: re-read every blob against its SHA-256, report bit rot.
-3. **Trash**: a deleted object is kept N days, then purged. Not versioning: no history, overwrites don't go to trash. Share links don't work while an object is in trash.
+1. **Download names** (done): optional `filename` per share link; `?download[=name]` on object and link GETs forces a save (`attachment`).
+2. **`blobfish verify`** (done): re-read every blob against its SHA-256, report bit rot.
+3. **Trash** (done): a deleted object is kept N days, then purged. Not versioning: no history, overwrites don't go to trash. Share links don't work while an object is in trash.
 4. **Quotas**: per bucket only. Trash does not count toward the quota.
 5. **Upload links**: share links that let someone without a key upload files.
 6. **Webhooks** on object put/delete.
@@ -184,8 +186,9 @@ CI (`.github/workflows/ci.yml`) runs gofmt, vet, race tests, then builds linux a
 - Free-space reserve (`internal/engine/space.go`): `Put` refuses with `ErrInsufficientStorage` (HTTP 507) if `Meta.SizeHint` (from Content-Length) plus `min_free_space` won't fit, and `spaceGuard` re-checks every 64 MiB while streaming. Deletes are never blocked. `diskFree` uses `statfs` (unix); a file system reporting zero total blocks (LazyFS, some FUSE/network fs) means "unknown", not full, and the check is skipped, as on non-unix. Raw `ENOSPC` also maps to 507. Verified on a real 64 MB tmpfs filled to 0 bytes: deletes, restart and data all fine.
 - Backups (`internal/engine/backup.go`): tar of `manifest.json`, `meta.db` (one bbolt read tx via `tx.WriteTo`) and every blob that snapshot references. While any backup runs, `removeBlob` queues deletions in `deferredRemovals` and the janitor deletes nothing, so no snapshot blob can vanish mid-copy (`TestBackupDuringWrites`; removing the pause makes it fail). `Restore` accepts only known entry names (no path traversal, regular files only), refuses non-empty targets, cleans up after itself on failure, then reads every object back through the checksum-verifying reader. CLI: `blobfish backup -o FILE` (server stopped; writes `.partial` then renames) and `blobfish restore -from FILE -data-dir DIR`. Backups contain key hashes, link tokens and the presign secret.
 - Verify (`internal/engine/verify.go`, CLI `blobfish verify [-bucket NAME]`, server stopped): reads every blob against its recorded size and SHA-256, runs bbolt's `tx.Check`, and flags objects whose blob is missing from the `blobs` index (`unindexed`: the janitor would delete them). Opens meta.db **read-only** and never calls `Open`, so no janitor or migration runs; refuses older/newer formats. `dropCache` (fadvise DONTNEED, linux only) makes reads hit the disk, not the page cache. Damage goes to stdout, one line each; exit 1 on any problem.
-- Data format versioning (`internal/engine/format.go`): `settings/format_version` holds `FormatVersion` (currently 1). `Open` checks it read-only *before writing anything* and refuses newer data (`ErrFormatTooNew`, protects downgrades); unstamped data is format 1. Any change to meta.db or the objects/ layout that older binaries would misread must bump `FormatVersion` and add a step in `migrationSteps()`; all steps run in one bbolt transaction (all or nothing).
-- Crash tests: `e.crash` hook stops a write dead at named points (`put:written|synced|renamed|committed`, `delete:committed`); `TestCrashPoints` reopens and checks old-or-new + no orphans. `TestKill9DuringWrites` SIGKILLs a child process (`TestCrashChild`) mid-write; skipped with `-short`. New write-path steps need a new crash point and table row.
+- Trash (`internal/engine/trash.go`, config `trash_days`, default 7, 0 = off): Delete moves the record to `trash/<bucket>/<trash id>` in one tx; the blob stays in `blobs`, so janitor and backups keep it. Trash IDs = hex nanosecond time + random, so they sort by delete time. `PurgeAt` is fixed at delete time (changing the setting affects only later deletes). The janitor purges due items (record + `blobs` entry + links in one tx, then the file). Restore refuses when the key is taken (`ErrKeyExists`). `DeleteBucket` refuses while the bucket has trash. Trash doesn't count toward quotas (decided). Verify checks trashed blobs too. Overwrites never go to trash (not versioning). UI: `#/trash/<bucket>` (`js/trash.js`), for keys with bucket write.
+- Data format versioning (`internal/engine/format.go`): `settings/format_version` holds `FormatVersion` (currently 2; 1→2 added trash). `Open` checks it read-only *before writing anything* and refuses newer data (`ErrFormatTooNew`, protects downgrades); unstamped data is format 1. Any change to meta.db or the objects/ layout that older binaries would misread must bump `FormatVersion` and add a step in `migrationSteps()`; all steps run in one bbolt transaction (all or nothing).
+- Crash tests: `e.crash` hook stops a write dead at named points (`put:written|synced|renamed|committed`, `delete:committed`, `purge:committed` tested in `TestTrashCrashDuringPurge`); `TestCrashPoints` reopens and checks old-or-new + no orphans. `TestKill9DuringWrites` SIGKILLs a child process (`TestCrashChild`) mid-write; skipped with `-short`. New write-path steps need a new crash point and table row.
 - Access log names the actor in `key=`: `<key name>/<key id>`, `presigned`, `link:<id>` or `public` (set via `setActor`; handlers authenticate through `a.authenticate`, never `a.auth.Authenticate` directly). Never a secret.
 - CORS is **per bucket only** (decided; no server-wide setting): `BucketInfo.CORSOrigins`, edited via `PATCH /v1/buckets/{bucket}` `{"corsOrigins": [...]}` (bucket admin) or the UI's **Browser access** dialog; applies immediately. `api.cors` (`internal/server/cors.go`) runs before auth in `api.objects` and `serveLink` (share links use their file's bucket): listed origins get preflight 204 (requested headers echoed, since X-Meta-* names vary) and exposed ETag/Content-Range/X-Request-Id; others, and missing buckets, get 403 `CORSNotAllowed` on preflight and no headers otherwise. Always `Vary: Origin`. No cookies anywhere, so `"*"` is acceptable. Origins normalized by `store.NormalizeCORSOrigins` (exact scheme://host[:port], max 20). Verified in Chromium, configured through the UI.
 - Reverse proxies (`internal/server/proxy.go`): `X-Forwarded-For`/`X-Forwarded-Proto` are believed only when the direct peer is in `trusted_proxies`; the client is the right-most untrusted XFF entry (left entries are client-forgeable). The access log's `remote` is that client, `proxy` the peer. `baseURL` (presign/share links) uses https only via TLS or a trusted proxy. HTTPS itself is Caddy's job: `docs/deploy.md` (Caddyfile, hardened systemd unit scoring 1.1 in `systemd-analyze security`, backups, upgrades), verified end to end with Caddy in Docker.

@@ -30,6 +30,7 @@ type Options struct {
 	Buckets     store.Buckets
 	Auth        *auth.Service
 	Links       store.Links
+	Trash       store.Trash
 	Backup      store.Backuper
 	Health      store.HealthChecker
 	// Version and DataFormat are reported by GET /v1/status.
@@ -47,6 +48,7 @@ type api struct {
 	buckets  store.Buckets
 	auth     *auth.Service
 	links    store.Links
+	trash    store.Trash
 	backuper store.Backuper
 	health   store.HealthChecker
 	stats    *serverStats
@@ -65,6 +67,7 @@ func New(opts Options) http.Handler {
 		buckets:    opts.Buckets,
 		auth:       opts.Auth,
 		links:      opts.Links,
+		trash:      opts.Trash,
 		backuper:   opts.Backup,
 		health:     opts.Health,
 		stats:      &serverStats{started: time.Now()},
@@ -92,6 +95,10 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET /s/{token}/{name...}", a.serveLink)
 	mux.HandleFunc("OPTIONS /s/{token}", a.serveLink)
 	mux.HandleFunc("OPTIONS /s/{token}/{name...}", a.serveLink)
+	mux.HandleFunc("GET /v1/trash/{bucket}", a.listTrash)
+	mux.HandleFunc("DELETE /v1/trash/{bucket}", a.emptyTrash)
+	mux.HandleFunc("POST /v1/trash/{bucket}/{id}/restore", a.restoreTrash)
+	mux.HandleFunc("DELETE /v1/trash/{bucket}/{id}", a.purgeTrashItem)
 	mux.HandleFunc("POST /v1/presign", a.presign)
 	mux.HandleFunc("GET /v1/keys", a.listKeys)
 	mux.HandleFunc("POST /v1/keys", a.createKey)

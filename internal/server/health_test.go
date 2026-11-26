@@ -100,7 +100,7 @@ func TestStatusEndpoint(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &st); err != nil {
 		t.Fatal(err)
 	}
-	if st.Version != "v-test" || st.DataFormat != 1 || st.Disk.FreeBytes <= 0 {
+	if st.Version != "v-test" || st.DataFormat != engine.FormatVersion || st.Disk.FreeBytes <= 0 {
 		t.Errorf("status = %s", rr.Body)
 	}
 	// So far: create(201), put(200), 404, 401, 403. The status request itself

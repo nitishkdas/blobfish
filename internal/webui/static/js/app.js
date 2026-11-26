@@ -5,6 +5,7 @@ import { api, forgetKey, loadKey, saveKey, session, showError } from "./api.js";
 import { h, icon, iconButton, toast, wireDialogBackdrops } from "./dom.js";
 import { reload, renderFiles, showRoute } from "./files.js";
 import { describeScope, loadKeys, renderKeysPage } from "./keys.js";
+import { renderTrash, showTrash } from "./trash.js";
 import { navigate, parseHash } from "./router.js";
 import { can, isServerAdmin, state, ui } from "./state.js";
 import { renderUploadPanel, stopAllUploads } from "./uploads.js";
@@ -59,7 +60,7 @@ async function enterApp(key) {
     api("GET", "/v1/buckets", { key }),
   ]);
   session.key = key;
-  state.me = { keyId: me.keyId, name: me.name, scopes: me.scopes, maxObjectSize: me.maxObjectSize };
+  state.me = { keyId: me.keyId, name: me.name, scopes: me.scopes, maxObjectSize: me.maxObjectSize, trashDays: me.trashDays || 0 };
   state.buckets = buckets.buckets;
   route();
 }
@@ -68,7 +69,7 @@ function signOut(message = "") {
   stopAllUploads();
   forgetKey();
   session.key = null;
-  Object.assign(state, { me: { name: "", scopes: [], maxObjectSize: 0 }, buckets: [], apiKeys: [] });
+  Object.assign(state, { me: { name: "", scopes: [], maxObjectSize: 0, trashDays: 0 }, buckets: [], apiKeys: [] });
   Object.assign(state.listing, { bucket: null, prefix: "", cursors: [""], page: 1, folders: [], files: [], nextCursor: "", loaded: false });
   history.replaceState(null, "", "#/");
   renderLogin(message);
@@ -85,7 +86,11 @@ function route() {
     navigate({ view: "home" }, { replace: true });
     return;
   }
-  if (r.view === "files" && !state.buckets.some((b) => b.name === r.bucket)) {
+  if (r.view === "trash" && !can("w", r.bucket)) {
+    navigate({ view: "files", bucket: r.bucket, prefix: "", page: 1 }, { replace: true });
+    return;
+  }
+  if ((r.view === "files" || r.view === "trash") && !state.buckets.some((b) => b.name === r.bucket)) {
     if (r.bucket) toast(`No bucket “${r.bucket}” for this key.`, { error: true });
     navigate({ view: "home" }, { replace: true });
     return;
@@ -98,6 +103,7 @@ function route() {
   state.route = r;
   if (r.view === "files") showRoute(r); // resets the listing synchronously, then loads
   if (r.view === "keys") loadKeys();
+  if (r.view === "trash") showTrash(r);
   renderApp();
 }
 
@@ -126,7 +132,7 @@ function renderSidebar() {
     : h("ul", {}, state.buckets.map((b) =>
       h("li", {}, h("a", {
         href: `#/b/${encodeURIComponent(b.name)}/`,
-        "aria-current": r.view === "files" && b.name === r.bucket ? "true" : "false",
+        "aria-current": (r.view === "files" || r.view === "trash") && b.name === r.bucket ? "true" : "false",
       }, h("span", { class: "bucket-name" }, b.name),
       b.public && h("span", { class: "public-mark", title: "Public: files can be read without a key" }, icon("globe", 14))))));
 
@@ -172,6 +178,7 @@ function renderMain() {
   const r = state.route;
   if (r.view === "keys") return renderKeysPage();
   if (r.view === "files" && can("r", r.bucket)) return renderFiles();
+  if (r.view === "trash" && can("w", r.bucket)) return renderTrash();
   return h("section", { class: "main", "aria-label": "Files" },
     h("p", { class: "empty" }, isServerAdmin() ? "Create a bucket to get started." : "Nothing to show for this key."));
 }

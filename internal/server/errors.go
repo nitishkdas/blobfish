@@ -45,6 +45,8 @@ const (
 	CodeInsufficientSpace = "InsufficientStorage"
 	CodeCORSNotAllowed    = "CORSNotAllowed"
 	CodeInvalidOrigin     = "InvalidOrigin"
+	CodeNoSuchTrashItem   = "NoSuchTrashItem"
+	CodeKeyExists         = "KeyExists"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This
@@ -69,6 +71,8 @@ var errorMapping = []struct {
 	{store.ErrNoSuchAPIKey, http.StatusNotFound, CodeNoSuchAPIKey},
 	{store.ErrNoSuchLink, http.StatusNotFound, CodeNoSuchLink},
 	{store.ErrInvalidOrigin, http.StatusBadRequest, CodeInvalidOrigin},
+	{store.ErrNoSuchTrashItem, http.StatusNotFound, CodeNoSuchTrashItem},
+	{store.ErrKeyExists, http.StatusConflict, CodeKeyExists},
 	{errLinkExpired, http.StatusGone, CodeLinkExpired},
 	{auth.ErrUnauthenticated, http.StatusUnauthorized, CodeUnauthorized},
 	{auth.ErrSignatureInvalid, http.StatusForbidden, CodeSignatureInvalid},

@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,8 +38,8 @@ func storedFormat(t *testing.T, dir string) string {
 func TestFormatStampedOnNewDataDir(t *testing.T) {
 	dir := t.TempDir()
 	openTest(t, dir).Close()
-	if v := storedFormat(t, dir); v != "1" {
-		t.Errorf("format_version = %q, want 1", v)
+	if v := storedFormat(t, dir); v != strconv.Itoa(FormatVersion) {
+		t.Errorf("format_version = %q, want %d", v, FormatVersion)
 	}
 }
 
@@ -53,8 +54,8 @@ func TestFormatPreVersioningDataIsKept(t *testing.T) {
 		t.Errorf("data after stamping: %q", got)
 	}
 	e.Close()
-	if v := storedFormat(t, dir); v != "1" {
-		t.Errorf("format_version = %q, want 1", v)
+	if v := storedFormat(t, dir); v != strconv.Itoa(FormatVersion) {
+		t.Errorf("format_version = %q, want %d", v, FormatVersion)
 	}
 }
 

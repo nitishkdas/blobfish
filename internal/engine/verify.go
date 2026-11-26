@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -34,12 +35,17 @@ type VerifyProblem struct {
 	Key    string
 	Blob   string
 	Detail string
+	// InTrash: the object was deleted and is waiting in trash.
+	InTrash bool
 }
 
 func (p VerifyProblem) String() string {
 	where := "meta.db"
 	if p.Bucket != "" {
 		where = p.Bucket + "/" + p.Key
+		if p.InTrash {
+			where += " (in trash)"
+		}
 	}
 	s := fmt.Sprintf("%-9s %s: %s", p.Kind, where, p.Detail)
 	if p.Blob != "" {
@@ -134,43 +140,47 @@ func Verify(ctx context.Context, dir string, opts VerifyOptions) (VerifyStats, e
 	e := &Engine{objDir: filepath.Join(dir, "objects")} // only for blobPath
 	for _, bucket := range buckets {
 		st.Buckets++
-		after := []byte(nil)
-		for {
-			if err := ctx.Err(); err != nil {
-				return st, err
-			}
-			batch, err := readVerifyBatch(db, bucket, after)
-			if err != nil {
-				return st, err
-			}
-			for _, it := range batch {
+		// Live objects, then the bucket's trash: trashed objects can still
+		// be restored, so their bytes matter too.
+		for _, inTrash := range []bool{false, true} {
+			after := []byte(nil)
+			for {
 				if err := ctx.Err(); err != nil {
 					return st, err
 				}
-				st.Objects++
-				p := VerifyProblem{Bucket: bucket, Key: it.key, Blob: it.rec.Blob}
-				switch {
-				case it.decodeErr != nil:
-					p.Kind, p.Detail = ProblemMetadata, "unreadable object record: "+it.decodeErr.Error()
-					report(p)
-					continue
-				case !it.indexed:
-					p.Kind, p.Detail = ProblemUnindexed, "blob is missing from the blob index; starting the server would delete it"
-					report(p)
-					// Still check the bytes: they may be fine and worth saving.
+				batch, err := readVerifyBatch(db, bucket, inTrash, after)
+				if err != nil {
+					return st, err
 				}
-				n, kind, detail := checkBlob(e.blobPath(it.rec.Blob), it.rec.Size, it.rec.ETag)
-				st.Bytes += n
-				if kind != "" {
-					p.Kind, p.Detail = kind, detail
-					report(p)
+				for _, it := range batch {
+					if err := ctx.Err(); err != nil {
+						return st, err
+					}
+					st.Objects++
+					p := VerifyProblem{Bucket: bucket, Key: it.key, Blob: it.rec.Blob, InTrash: inTrash}
+					switch {
+					case it.decodeErr != nil:
+						p.Kind, p.Detail = ProblemMetadata, "unreadable object record: "+it.decodeErr.Error()
+						report(p)
+						continue
+					case !it.indexed:
+						p.Kind, p.Detail = ProblemUnindexed, "blob is missing from the blob index; starting the server would delete it"
+						report(p)
+						// Still check the bytes: they may be fine and worth saving.
+					}
+					n, kind, detail := checkBlob(e.blobPath(it.rec.Blob), it.rec.Size, it.rec.ETag)
+					st.Bytes += n
+					if kind != "" {
+						p.Kind, p.Detail = kind, detail
+						report(p)
+					}
+					progress()
 				}
-				progress()
+				if len(batch) < verifyBatch {
+					break
+				}
+				after = []byte(batch[len(batch)-1].cursor)
 			}
-			if len(batch) < verifyBatch {
-				break
-			}
-			after = []byte(batch[len(batch)-1].key)
 		}
 	}
 
@@ -226,25 +236,30 @@ func verifyBucketNames(db *bbolt.DB, only string) ([]string, error) {
 }
 
 type verifyItem struct {
+	cursor    string // the bbolt key: object key, or trash ID
 	key       string
 	rec       objectRecord
 	decodeErr error
 	indexed   bool
 }
 
-// readVerifyBatch returns up to verifyBatch records after the key after,
-// each with whether its blob is in the index. Blob files are checked
-// outside the transaction, so no read transaction stays open for long.
-func readVerifyBatch(db *bbolt.DB, bucket string, after []byte) ([]verifyItem, error) {
+// readVerifyBatch returns up to verifyBatch records after the bbolt key
+// after, from the bucket's objects or its trash, each with whether its blob
+// is in the index. Blob files are checked outside the transaction, so no
+// read transaction stays open for long.
+func readVerifyBatch(db *bbolt.DB, bucket string, inTrash bool, after []byte) ([]verifyItem, error) {
 	var out []verifyItem
 	err := db.View(func(tx *bbolt.Tx) error {
-		objs, err := objectsOf(tx, bucket)
-		if err != nil {
-			// The bucket row exists (we listed it) but its objects don't.
-			if errors.Is(err, store.ErrNoSuchBucket) {
-				return nil
+		var objs *bbolt.Bucket
+		if inTrash {
+			if tb := tx.Bucket(bktTrash); tb != nil {
+				objs = tb.Bucket([]byte(bucket))
 			}
-			return err
+		} else if o := tx.Bucket(bktObjects); o != nil {
+			objs = o.Bucket([]byte(bucket))
+		}
+		if objs == nil {
+			return nil // no objects (or no trash) yet
 		}
 		blobs := tx.Bucket(bktBlobs)
 		c := objs.Cursor()
@@ -256,8 +271,17 @@ func readVerifyBatch(db *bbolt.DB, bucket string, after []byte) ([]verifyItem, e
 			}
 		}
 		for ; k != nil && len(out) < verifyBatch; k, v = c.Next() {
-			it := verifyItem{key: string(k)}
-			it.rec, it.decodeErr = decodeObject(v)
+			it := verifyItem{cursor: string(k), key: string(k)}
+			if inTrash {
+				var tr trashRecord
+				it.decodeErr = json.Unmarshal(v, &tr)
+				it.key, it.rec = tr.Key, tr.Object
+				if it.key == "" {
+					it.key = "trash id " + string(k)
+				}
+			} else {
+				it.rec, it.decodeErr = decodeObject(v)
+			}
 			if it.decodeErr == nil && blobs != nil {
 				it.indexed = blobs.Get([]byte(it.rec.Blob)) != nil
 			}

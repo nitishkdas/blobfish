@@ -11,7 +11,7 @@ import (
 // FormatVersion is the on-disk format this binary reads and writes. Bump it
 // whenever meta.db or the objects/ layout changes in a way older binaries
 // would misread, and add the upgrade step to migrationSteps.
-const FormatVersion = 1
+const FormatVersion = 2
 
 // ErrFormatTooNew means the data dir was written by a newer BlobFish.
 // Opening it with this binary could misread or damage it.
@@ -23,9 +23,17 @@ var setFormat = []byte("format_version") // in bktSettings, decimal
 type migration func(tx *bbolt.Tx) error
 
 // migrationSteps maps a format version to the step that upgrades it to
-// the next one. Empty while BlobFish is on its first format.
+// the next one.
 func migrationSteps() map[int]migration {
-	return map[int]migration{}
+	return map[int]migration{
+		// 2: trash. Adds the "trash" bucket and LinkRecord.Trashed. A
+		// format-1 binary would serve links of trashed objects again
+		// after a re-upload and never purge trash, so it must refuse.
+		1: func(tx *bbolt.Tx) error {
+			_, err := tx.CreateBucketIfNotExists(bktTrash)
+			return err
+		},
+	}
 }
 
 // readFormat returns the stamped format version, or 0 if there is none: a

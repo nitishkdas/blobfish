@@ -2,6 +2,7 @@
 // button work:
 //
 //   #/b/<bucket>/<folder>/<sub>/?page=3&size=50
+//   #/trash/<bucket>
 //   #/keys
 //
 // Folder segments are percent-encoded one by one; keys may contain anything.
@@ -17,6 +18,10 @@ export function parseHash(hash = location.hash) {
   const size = PAGE_SIZES.includes(sizeParam) ? sizeParam : null;
 
   if (path === "/keys") return { view: "keys" };
+  const t = path.match(/^\/trash\/([^/]+)\/?$/);
+  if (t) {
+    try { return { view: "trash", bucket: decodeURIComponent(t[1]) }; } catch { return { view: "home" }; }
+  }
   const m = path.match(/^\/b\/([^/]+)\/?(.*)$/);
   if (m) {
     let prefix = "";
@@ -31,6 +36,7 @@ export function parseHash(hash = location.hash) {
 
 export function formatHash(route) {
   if (route.view === "keys") return "#/keys";
+  if (route.view === "trash" && route.bucket) return `#/trash/${encodeURIComponent(route.bucket)}`;
   if (route.view !== "files" || !route.bucket) return "#/";
   const folder = route.prefix ? route.prefix.split("/").map(encodeURIComponent).join("/") : "";
   const params = new URLSearchParams();

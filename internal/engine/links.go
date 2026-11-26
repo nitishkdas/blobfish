@@ -66,7 +66,14 @@ func (e *Engine) LinkByToken(ctx context.Context, token string) (store.LinkRecor
 		if v == nil {
 			return store.ErrNoSuchLink
 		}
-		return json.Unmarshal(v, &rec)
+		if err := json.Unmarshal(v, &rec); err != nil {
+			return err
+		}
+		if rec.Trashed != "" {
+			// Its object is in trash: the link works again on restore.
+			return fmt.Errorf("%w: object is in trash", store.ErrNoSuchLink)
+		}
+		return nil
 	})
 	return rec, err
 }
@@ -105,7 +112,9 @@ func (e *Engine) ListLinks(ctx context.Context, bucket, key string) ([]store.Lin
 			if err := json.Unmarshal(links.Get(token), &rec); err != nil {
 				return fmt.Errorf("decode share link: %w", err)
 			}
-			out = append(out, rec)
+			if rec.Trashed == "" { // links of trashed objects are hidden until restored
+				out = append(out, rec)
+			}
 			return nil
 		}
 		if bucket == "" {
