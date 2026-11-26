@@ -27,13 +27,36 @@ server and run `./blobfish -new-admin-key` to mint another.
 
 ## Web UI
 
-Open `http://localhost:8080/` and sign in with an API key. You can browse
-buckets and folders page by page, open files in the browser, see details
-(including the SHA-256 checksum), upload files or whole folders (by button
-or drag and drop, with a prompt before overwriting), download, delete, and
-make share links that expire (1 hour to 7 days). Admin keys also get an
-API keys page to create and revoke keys scoped to buckets. Buttons a key
-isn't allowed to use are hidden.
+Open `http://localhost:8080/` and sign in. You can browse buckets and
+folders page by page, open files in the browser, see details (including
+the SHA-256 checksum), upload files or whole folders (by button or drag and
+drop, with a prompt before overwriting), download, delete, and make share
+links. Buttons you aren't allowed to use are hidden.
+
+### Users and API keys
+
+**People** sign in with a user name and password; **apps** use API keys.
+Both get the same kind of access: per bucket read, write, read & write or
+admin.
+
+1. On first start BlobFish writes an admin API key to
+   `<data_dir>/initial-admin-key`. Sign in with it ("Sign in with an API
+   key instead"), open **Users** and add a user for yourself with access to
+   *All buckets · Admin*. Then sign in with that user, store the key
+   somewhere safe (or revoke it once you have another admin key) and delete
+   the file.
+2. Add a user for each person, with only the buckets they need. They can
+   change their password from the lock button next to their name.
+
+Sessions end after 12 hours without use and after 7 days at most. Changing
+a password signs that user out everywhere else; admins can also sign a
+user out everywhere. Repeated wrong passwords are slowed down (10 per user
+name and 30 per address per 15 minutes). Passwords are stored as
+PBKDF2-SHA256 hashes (600,000 rounds).
+
+Forgot the password and no admin can sign in? Stop the server and run
+`blobfish -reset-password NAME`: it prints a new random password and ends
+that user's sessions.
 
 ## Using the API
 
@@ -67,6 +90,11 @@ curl -X POST -H "$H" -d '{"bucket":"invoices","folder":"from-acme","label":"Invo
 # Deleted by mistake? Deletes go to the bucket's trash for 7 days:
 curl -H "$H" localhost:8080/v1/trash/invoices                      # list, newest first
 curl -X POST -H "$H" localhost:8080/v1/trash/invoices/<id>/restore  # put it back
+
+# Users (server admin): add one, sign in as them, change your own password.
+curl -X POST -H "$H" -d '{"name":"priya","password":"a long password","scopes":["invoices:rw"]}' localhost:8080/v1/users
+curl -X POST -d '{"username":"priya","password":"a long password"}' localhost:8080/v1/login   # -> {"token":"bfs_..."}
+curl -X POST -H "Authorization: Bearer bfs_..." -d '{"currentPassword":"...","newPassword":"..."}' localhost:8080/v1/password
 
 # Cap a bucket at 5 GiB (server admin key; 0 removes the cap, the smallest
 # cap is 10 MiB). Uploads that don't fit get 507 QuotaExceeded; files in

@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nitishkdas/blobfish/internal/auth"
 	"github.com/nitishkdas/blobfish/internal/engine"
 	"github.com/nitishkdas/blobfish/internal/store"
 )
@@ -270,5 +272,57 @@ func TestVerifyCommand(t *testing.T) {
 	}
 	if err := run(ctx, []string{"verify", "extra"}, env, &stdout, &stderr); err == nil {
 		t.Error("verify accepted a stray argument")
+	}
+}
+
+func TestResetPasswordCommand(t *testing.T) {
+	auth.UseCheapPasswordHashForTests()
+	dataDir := filepath.Join(t.TempDir(), "data")
+	env := func(k string) string { return map[string]string{"BLOBFISH_DATA_DIR": dataDir}[k] }
+	ctx := context.Background()
+	eng, err := engine.Open(dataDir, engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := auth.NewService(eng, eng.PresignSecret()).UseUsers(eng)
+	if _, err := svc.CreateUser(ctx, "maya", "forgotten password", []string{"*:admin"}); err != nil {
+		t.Fatal(err)
+	}
+	old, _, _, err := svc.Login(ctx, "maya", "forgotten password", "1.1.1.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng.Close()
+
+	var stdout, stderr bytes.Buffer
+	if err := run(ctx, []string{"-reset-password", "nobody"}, env, &stdout, &stderr); err == nil {
+		t.Fatal("reset for an unknown user succeeded")
+	}
+	stdout.Reset()
+	if err := run(ctx, []string{"-reset-password", "Maya"}, env, &stdout, &stderr); err != nil {
+		t.Fatalf("reset: %v\n%s", err, stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	pw := lines[len(lines)-1]
+	if len(pw) != 29 || strings.Count(pw, "-") != 3 {
+		t.Fatalf("printed password = %q", pw)
+	}
+
+	eng, err = engine.Open(dataDir, engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	svc = auth.NewService(eng, eng.PresignSecret()).UseUsers(eng)
+	if _, _, _, err := svc.Login(ctx, "maya", pw, "1.1.1.1"); err != nil {
+		t.Errorf("new password doesn't work: %v", err)
+	}
+	if _, _, _, err := svc.Login(ctx, "maya", "forgotten password", "1.1.1.1"); err == nil {
+		t.Error("old password still works")
+	}
+	r := httptest.NewRequest("GET", "/v1/whoami", nil)
+	r.Header.Set("Authorization", "Bearer "+old)
+	if _, err := svc.Authenticate(r, auth.Target{}); err == nil {
+		t.Error("old session survived the reset")
 	}
 }

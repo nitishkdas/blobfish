@@ -154,16 +154,17 @@
       </div>
     </form>
   </dialog>
-  <!-- Filled by openCreateKey() in js/keys.js. Not method="dialog": the
-       form stays open until the server accepts the key. -->
-  <dialog id="create-key">
-    <form id="create-key-form" class="dialog key-dialog">
-      <h2>Create API key</h2>
-      <p class="muted">Give each app its own key, limited to the buckets it needs.</p>
-      <div id="create-key-body" class="key-dialog-body"></div>
+  <!-- Generic form dialog, filled by formDialog() in js/dom.js. Not
+       method="dialog": it stays open until the save succeeds. -->
+  <dialog id="form-dialog">
+    <form id="form-dialog-form" class="dialog form-dialog">
+      <h2 id="form-dialog-title"></h2>
+      <p id="form-dialog-text" class="muted"></p>
+      <div id="form-dialog-body" class="form-dialog-body"></div>
+      <p id="form-dialog-error" class="hint" role="alert"></p>
       <div class="row end">
-        <button type="button" id="create-key-cancel">Cancel</button>
-        <button type="submit" id="create-key-submit" class="primary">Create key</button>
+        <button type="button" id="form-dialog-cancel">Cancel</button>
+        <button type="submit" id="form-dialog-submit" class="primary"></button>
       </div>
     </form>
   </dialog>

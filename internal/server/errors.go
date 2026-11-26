@@ -52,6 +52,13 @@ const (
 	CodePreconditionFailed = "PreconditionFailed"
 	CodeNoSuchWebhook      = "NoSuchWebhook"
 	CodeTooManyWebhooks    = "TooManyWebhooks"
+	CodeInvalidCredentials = "InvalidCredentials"
+	CodeTooManyAttempts    = "TooManyAttempts"
+	CodeNoSuchUser         = "NoSuchUser"
+	CodeUserExists         = "UserAlreadyExists"
+	CodeInvalidPassword    = "InvalidPassword"
+	CodeInvalidUserName    = "InvalidUserName"
+	CodeNotSession         = "NotSignedInAsUser"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This
@@ -93,6 +100,13 @@ var errorMapping = []struct {
 	{auth.ErrInvalidKeyName, http.StatusBadRequest, CodeInvalidRequest},
 	{auth.ErrInvalidPresign, http.StatusBadRequest, CodeInvalidRequest},
 	{auth.ErrLastAdminKey, http.StatusConflict, CodeLastAdminKey},
+	{auth.ErrBadCredentials, http.StatusUnauthorized, CodeInvalidCredentials},
+	{auth.ErrTooManyAttempts, http.StatusTooManyRequests, CodeTooManyAttempts},
+	{auth.ErrInvalidPassword, http.StatusBadRequest, CodeInvalidPassword},
+	{auth.ErrInvalidUserName, http.StatusBadRequest, CodeInvalidUserName},
+	{auth.ErrNotSession, http.StatusBadRequest, CodeNotSession},
+	{store.ErrNoSuchUser, http.StatusNotFound, CodeNoSuchUser},
+	{store.ErrUserExists, http.StatusConflict, CodeUserExists},
 	{errAccessDenied, http.StatusForbidden, CodeAccessDenied},
 	{errBadRequest, http.StatusBadRequest, CodeInvalidRequest},
 	{context.Canceled, http.StatusBadRequest, CodeInvalidRequest},

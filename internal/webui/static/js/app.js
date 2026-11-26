@@ -1,10 +1,11 @@
 // BlobFish web UI entry point: sign-in, the app shell and routing. Talks
-// only to the /v1 API with the API key the user pastes in.
+// only to the /v1 API, with a session token (user sign-in) or an API key.
 
 import { api, forgetKey, loadKey, saveKey, session, showError } from "./api.js";
 import { ask, emptyState, formatSize, h, icon, iconButton, toast, wireDialogBackdrops } from "./dom.js";
 import { reload, renderFiles, showRoute } from "./files.js";
 import { describeScope, loadKeys, renderKeysPage } from "./keys.js";
+import { changeOwnPassword, loadUsers, renderUsersPage } from "./users.js";
 import { renderTrash, showTrash } from "./trash.js";
 import { renderSettings, showSettings } from "./settings.js";
 import { navigate, parseHash } from "./router.js";
@@ -18,35 +19,67 @@ function root() { return document.getElementById("app"); }
 
 // ---------- Sign in ----------
 
-function renderLogin(message = "") {
-  const input = h("input", {
-    type: "password", autocomplete: "off", spellcheck: "false", placeholder: "bf_…",
-    "aria-label": "API key", class: "mono", required: true,
-  });
+// renderLogin shows the sign-in card: user name + password, or (for admins
+// before any user exists, and for scripts' keys) an API key.
+function renderLogin(message = "", mode = "user") {
   const remember = h("input", { type: "checkbox" });
   const error = h("p", { class: "error", role: "alert" }, message);
   const submit = h("button", { class: "primary block", type: "submit" }, "Sign in");
+  let fields, first, attempt;
+
+  if (mode === "user") {
+    const name = h("input", { autocomplete: "username", spellcheck: "false", autocapitalize: "none", required: true });
+    const pw = h("input", { type: "password", autocomplete: "current-password", required: true });
+    fields = [h("label", { class: "field" }, "User name", name), h("label", { class: "field" }, "Password", pw)];
+    first = name;
+    attempt = async () => {
+      let res;
+      try {
+        res = await api("POST", "/v1/login", { key: "", body: { username: name.value.trim(), password: pw.value } });
+      } catch (err) {
+        if (err.code === "InvalidCredentials") throw new Error("Wrong user name or password.");
+        if (err.code === "TooManyAttempts") throw new Error("Too many failed attempts. Wait a few minutes and try again.");
+        throw err;
+      }
+      await enterApp(res.token);
+      saveKey(res.token, remember.checked);
+    };
+  } else {
+    const key = h("input", {
+      type: "password", autocomplete: "off", spellcheck: "false", placeholder: "bf_…", class: "mono", required: true,
+    });
+    fields = [h("label", { class: "field" }, "API key", key)];
+    first = key;
+    attempt = async () => {
+      const k = key.value.trim();
+      try {
+        await enterApp(k);
+      } catch (err) {
+        if (err.status === 401) throw new Error("That key was not accepted.");
+        throw err;
+      }
+      saveKey(k, remember.checked);
+    };
+  }
 
   const form = h("form", {
     onsubmit: async (ev) => {
       ev.preventDefault();
-      const key = input.value.trim();
       submit.disabled = true;
       error.textContent = "";
       try {
-        await enterApp(key);
-        saveKey(key, remember.checked);
+        await attempt();
       } catch (err) {
-        error.textContent = err.status === 401 ? "That key was not accepted." : err.message;
+        error.textContent = err.message;
       } finally {
         submit.disabled = false;
       }
     },
-  },
-  h("label", { class: "field" }, "API key", input),
-  h("label", { class: "check" }, remember, "Remember on this device"),
-  error,
-  submit);
+  }, fields, h("label", { class: "check" }, remember, "Keep me signed in on this device"), error, submit);
+
+  const other = mode === "user"
+    ? h("button", { type: "button", class: "link login-switch", onclick: () => renderLogin("", "key") }, "Sign in with an API key instead")
+    : h("button", { type: "button", class: "link login-switch", onclick: () => renderLogin("", "user") }, "Sign in with a user name instead");
 
   root().className = "";
   root().replaceChildren(h("main", { class: "login" },
@@ -54,10 +87,13 @@ function renderLogin(message = "") {
     h("div", { class: "login-card" },
       h("img", { src: "favicon.svg", alt: "" }),
       h("h1", {}, "Sign in to BlobFish"),
-      h("p", { class: "muted" }, "Use an API key. It stays in this browser and is sent only to this server."),
-      form),
-    h("p", { class: "login-foot" }, "No key? A server admin can create one, or find the first one in ", h("code", {}, "<data_dir>/initial-admin-key"), ".")));
-  input.focus();
+      h("p", { class: "muted" }, mode === "user"
+        ? "Use the user name and password your admin gave you."
+        : "Paste an API key. It stays in this browser and is sent only to this server."),
+      form,
+      other),
+    mode === "key" && h("p", { class: "login-foot" }, "First time? The first admin key is in ", h("code", {}, "<data_dir>/initial-admin-key"), ".")));
+  first.focus();
 }
 
 // enterApp checks the key, learns what it may do, and shows the app.
@@ -67,29 +103,36 @@ async function enterApp(key) {
     api("GET", "/v1/buckets", { key }),
   ]);
   session.key = key;
-  state.me = { keyId: me.keyId, name: me.name, scopes: me.scopes, maxObjectSize: me.maxObjectSize, trashDays: me.trashDays || 0, minQuotaBytes: me.minQuotaBytes || 0 };
+  state.me = {
+    keyId: me.keyId, name: me.name, user: me.user || "", scopes: me.scopes,
+    maxObjectSize: me.maxObjectSize, trashDays: me.trashDays || 0, minQuotaBytes: me.minQuotaBytes || 0,
+  };
   state.buckets = buckets.buckets;
   route();
 }
 
 function signOut(message = "") {
   stopAllUploads();
+  // End the session on the server too (best effort; a key has none).
+  if (session.key?.startsWith("bfs_")) api("POST", "/v1/logout").catch(() => {});
   forgetKey();
   session.key = null;
-  Object.assign(state, { me: { name: "", scopes: [], maxObjectSize: 0, trashDays: 0 }, buckets: [], apiKeys: [] });
+  Object.assign(state, { me: { name: "", user: "", scopes: [], maxObjectSize: 0, trashDays: 0 }, buckets: [], apiKeys: [], users: [] });
   Object.assign(state.listing, { bucket: null, prefix: "", cursors: [""], page: 1, folders: [], files: [], nextCursor: "", loaded: false });
   history.replaceState(null, "", "#/");
   renderLogin(message);
 }
 
-session.onUnauthorized = () => signOut("Your API key was rejected or revoked. Sign in again.");
+session.onUnauthorized = () => signOut(state.me.user
+  ? "Your session ended. Sign in again."
+  : "Your API key was rejected or revoked. Sign in again.");
 
 // ---------- Routing ----------
 
 function route() {
   if (!session.key) return;
   const r = parseHash();
-  if (r.view === "keys" && !isServerAdmin()) {
+  if ((r.view === "keys" || r.view === "users") && !isServerAdmin()) {
     navigate({ view: "home" }, { replace: true });
     return;
   }
@@ -110,6 +153,7 @@ function route() {
   state.route = r;
   if (r.view === "files") showRoute(r); // resets the listing synchronously, then loads
   if (r.view === "keys") loadKeys();
+  if (r.view === "users") loadUsers();
   if (r.view === "trash") showTrash(r);
   if (r.view === "settings") showSettings(r);
   renderApp();
@@ -156,9 +200,13 @@ function renderSidebar() {
         items),
       isServerAdmin() && h("div", { class: "side-section" },
         h("div", { class: "side-head" }, h("h2", {}, "Server")),
-        h("ul", { class: "side-list" }, h("li", {}, h("a", {
-          href: "#/keys", "aria-current": r.view === "keys" ? "true" : "false",
-        }, icon("key", 16), h("span", { class: "bucket-name" }, "API keys")))))),
+        h("ul", { class: "side-list" },
+          h("li", {}, h("a", {
+            href: "#/users", "aria-current": r.view === "users" ? "true" : "false",
+          }, icon("users", 16), h("span", { class: "bucket-name" }, "Users"))),
+          h("li", {}, h("a", {
+            href: "#/keys", "aria-current": r.view === "keys" ? "true" : "false",
+          }, icon("key", 16), h("span", { class: "bucket-name" }, "API keys")))))),
     renderProfile(),
   ];
 }
@@ -191,17 +239,20 @@ function renderProfile() {
   if (isServerAdmin()) access = "Admin · all buckets";
   else if (scopes.length === 1) access = describeScope(scopes[0]);
   else access = `${scopes.length} bucket permissions`;
-  return h("div", { class: "profile", "aria-label": "Signed-in key" },
+  const user = state.me.user;
+  return h("div", { class: "profile", "aria-label": user ? "Signed-in user" : "Signed-in key" },
     h("span", { class: "avatar", "aria-hidden": "true" }, (name.trim()[0] || "?").toUpperCase()),
     h("div", { class: "profile-text", title: scopes.map(describeScope).join("\n") },
       h("span", { class: "profile-name" }, name),
-      h("span", { class: "profile-access" }, access)),
+      h("span", { class: "profile-access" }, user ? access : `API key · ${access}`)),
+    user && iconButton("lock", "Change password", changeOwnPassword),
     iconButton("signOut", "Sign out", () => signOut()));
 }
 
 function renderMain() {
   const r = state.route;
   if (r.view === "keys") return renderKeysPage();
+  if (r.view === "users") return renderUsersPage();
   if (r.view === "files" && can("r", r.bucket)) return renderFiles();
   if (r.view === "trash" && can("w", r.bucket)) return renderTrash();
   if (r.view === "settings" && can("w", r.bucket)) return renderSettings();

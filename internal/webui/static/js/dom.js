@@ -50,6 +50,9 @@ const ICONS = {
   bolt: ["M13 3L5 14h6l-1 7 8-11h-6z"],
   sun: ["M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8", "M12 2.5v2", "M12 19.5v2", "M4.9 4.9l1.4 1.4", "M17.7 17.7l1.4 1.4", "M2.5 12h2", "M19.5 12h2", "M4.9 19.1l1.4-1.4", "M17.7 6.3l1.4-1.4"],
   moon: ["M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"],
+  eye: ["M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z", "M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6"],
+  eyeOff: ["M2.5 12s3.5-6.5 9.5-6.5c1.6 0 3 .5 4.3 1.2", "M21.5 12s-3.5 6.5-9.5 6.5c-1.6 0-3-.5-4.3-1.2", "M9.9 9.9a3 3 0 0 0 4.2 4.2", "M4 4l16 16"],
+  users: ["M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7", "M2.5 20c.6-3.4 3.2-5.5 6.5-5.5s5.9 2.1 6.5 5.5", "M16 4.3a3.5 3.5 0 0 1 0 6.4", "M18 14.8c2 .7 3.2 2.5 3.5 5.2"],
   storage: ["M4 5h16v5H4z", "M4 14h16v5H4z", "M7.5 7.5h.01", "M7.5 16.5h.01"],
 };
 
@@ -207,4 +210,71 @@ export function emptyState({ icon: name, title, text = "", action = null }) {
     h("h3", {}, title),
     text && h("p", {}, text),
     action && h("div", { class: "empty-actions" }, action));
+}
+
+// formDialog shows a form in the shared #form-dialog. onSubmit runs on
+// submit; if it throws, the message shows in the dialog and it stays open.
+// Resolves true once onSubmit succeeded, false if cancelled.
+export function formDialog({ title, text = "", body, submitLabel, onSubmit, focus = null }) {
+  const dialog = document.getElementById("form-dialog");
+  const form = document.getElementById("form-dialog-form");
+  const submit = document.getElementById("form-dialog-submit");
+  const error = document.getElementById("form-dialog-error");
+  document.getElementById("form-dialog-title").textContent = title;
+  const textEl = document.getElementById("form-dialog-text");
+  textEl.textContent = text;
+  textEl.hidden = !text;
+  document.getElementById("form-dialog-body").replaceChildren(...[body].flat().filter(Boolean));
+  submit.textContent = submitLabel;
+  error.textContent = "";
+  form.oninput = () => { error.textContent = ""; };
+  let done = false;
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    submit.disabled = true;
+    try {
+      await onSubmit();
+      done = true;
+      dialog.close();
+    } catch (err) {
+      error.textContent = err.message || String(err);
+    } finally {
+      submit.disabled = false;
+    }
+  };
+  document.getElementById("form-dialog-cancel").onclick = () => dialog.close();
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(done), { once: true });
+    dialog.showModal();
+    (focus || form.querySelector("input, select"))?.focus();
+  });
+}
+
+// passwordInput is a password field with a show/hide toggle.
+export function passwordInput(attrs = {}) {
+  const input = h("input", { type: "password", autocomplete: "new-password", spellcheck: "false", ...attrs });
+  const toggle = h("button", {
+    type: "button", class: "icon-btn small reveal", "aria-label": "Show password", title: "Show password",
+    onclick: () => {
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      toggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      toggle.title = toggle.getAttribute("aria-label");
+      toggle.replaceChildren(icon(show ? "eyeOff" : "eye", 16));
+    },
+  }, icon("eye", 16));
+  return { el: h("div", { class: "password-field" }, input, toggle), input };
+}
+
+let fieldSeq = 0;
+// field is a labelled form row: the label names the control (for/id) and
+// the help text describes it (aria-describedby), so screen readers get a
+// short name, and buttons beside the input don't join it.
+export function field(label, control, help = "") {
+  const input = control.matches?.("input, select, textarea") ? control : control.querySelector("input, select, textarea");
+  const id = input.id || `f${++fieldSeq}`;
+  input.id = id;
+  const helpEl = help && h("span", { class: "field-help", id: `${id}-help` }, help);
+  if (helpEl) input.setAttribute("aria-describedby", helpEl.id);
+  return h("div", { class: "field" }, h("label", { for: id }, label), control, helpEl);
 }

@@ -44,7 +44,7 @@ func newTestAPIWith(t *testing.T, opts engine.Options) *testAPI {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { eng.Close() })
-	svc := auth.NewService(eng, eng.PresignSecret())
+	svc := auth.NewService(eng, eng.PresignSecret()).UseUsers(eng)
 	admin, err := svc.EnsureAdminKey(context.Background())
 	if err != nil {
 		t.Fatal(err)

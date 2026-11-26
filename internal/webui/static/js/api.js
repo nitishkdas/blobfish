@@ -24,12 +24,15 @@ async function parseError(res) {
 }
 
 export async function api(method, path, { body, key = session.key } = {}) {
-  const headers = { Authorization: `Bearer ${key}` };
+  const headers = {};
+  if (key) headers.Authorization = `Bearer ${key}`; // none for /v1/login
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   if (!res.ok) {
     const err = await parseError(res);
-    if (res.status === 401 && key === session.key) session.onUnauthorized();
+    // Only a rejected key/session signs out: a wrong password (when
+    // changing it) is 401 InvalidCredentials and must not.
+    if (res.status === 401 && err.code === "Unauthorized" && key && key === session.key) session.onUnauthorized();
     throw err;
   }
   // 204, or any answer without a body, has nothing to parse.

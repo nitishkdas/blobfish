@@ -124,6 +124,14 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET /v1/keys", a.listKeys)
 	mux.HandleFunc("POST /v1/keys", a.createKey)
 	mux.HandleFunc("DELETE /v1/keys/{id}", a.deleteKey)
+	mux.HandleFunc("POST /v1/login", a.login)
+	mux.HandleFunc("POST /v1/logout", a.logout)
+	mux.HandleFunc("POST /v1/password", a.changeOwnPassword)
+	mux.HandleFunc("GET /v1/users", a.listUsers)
+	mux.HandleFunc("POST /v1/users", a.createUser)
+	mux.HandleFunc("PATCH /v1/users/{name}", a.updateUser)
+	mux.HandleFunc("DELETE /v1/users/{name}", a.deleteUser)
+	mux.HandleFunc("DELETE /v1/users/{name}/sessions", a.signOutUser)
 	mux.Handle("GET "+webui.Prefix, webui.Handler())
 	mux.Handle("GET /favicon.ico", webui.Favicon())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +195,9 @@ func (a *api) fail(w http.ResponseWriter, r *http.Request, err error) {
 func (a *api) authenticate(r *http.Request, t auth.Target) (auth.Principal, error) {
 	p, err := a.auth.Authenticate(r, t)
 	if err == nil {
-		if p.KeyID != "" {
+		if p.User != "" {
+			setActor(r, "user:"+p.User+"/"+p.SessionID)
+		} else if p.KeyID != "" {
 			setActor(r, p.KeyName+"/"+p.KeyID)
 		} else {
 			setActor(r, "presigned")

@@ -269,6 +269,60 @@ type Keys interface {
 	DeleteKey(ctx context.Context, id string) error
 }
 
+// Users stores people who sign in with a name and password, and their
+// sessions. Passwords and session tokens are stored only as hashes.
+type Users interface {
+	// CreateUser returns ErrUserExists if the name is taken.
+	CreateUser(ctx context.Context, rec UserRecord) error
+	// GetUser returns ErrNoSuchUser if name is unknown.
+	GetUser(ctx context.Context, name string) (UserRecord, error)
+	// ListUsers returns all users, oldest first.
+	ListUsers(ctx context.Context) ([]UserRecord, error)
+	// UpdateUser changes a user in one transaction. When revokeSessions is
+	// true it also deletes the user's sessions, except the one whose hash
+	// is keepSession (may be empty), in the same transaction.
+	UpdateUser(ctx context.Context, name string, change func(*UserRecord) error, revokeSessions bool, keepSession string) (UserRecord, error)
+	// DeleteUser deletes the user and all their sessions.
+	DeleteUser(ctx context.Context, name string) error
+
+	// CreateSession stores a session and records the sign-in time on its
+	// user, in one transaction. ErrNoSuchUser if the user is gone.
+	CreateSession(ctx context.Context, rec SessionRecord) error
+	// SessionByHash returns the session and its user, or ErrNoSuchSession.
+	SessionByHash(ctx context.Context, hash string) (SessionRecord, UserRecord, error)
+	// TouchSession sets a session's LastSeen (no error if it is gone).
+	TouchSession(ctx context.Context, hash string, t time.Time) error
+	// DeleteSession deletes one session (no error if it is gone).
+	DeleteSession(ctx context.Context, hash string) error
+	// DeleteUserSessions signs a user out everywhere; returns how many.
+	DeleteUserSessions(ctx context.Context, name string) (int, error)
+	// PurgeSessions deletes sessions for which expired returns true.
+	PurgeSessions(ctx context.Context, expired func(SessionRecord) bool) (int, error)
+}
+
+// UserRecord is a stored user.
+type UserRecord struct {
+	Name   string   `json:"name"`
+	Scopes []string `json:"scopes"`
+	// PasswordHash is "pbkdf2-sha256$<iterations>$<salt b64>$<hash b64>".
+	PasswordHash    string    `json:"passwordHash"`
+	Created         time.Time `json:"created"`
+	PasswordChanged time.Time `json:"passwordChanged"`
+	LastLogin       time.Time `json:"lastLogin,omitzero"`
+}
+
+// SessionRecord is a signed-in browser. Hash is the lowercase hex SHA-256
+// of the token; ID is a short public handle for logs.
+type SessionRecord struct {
+	ID       string    `json:"id"`
+	Hash     string    `json:"hash"`
+	User     string    `json:"user"`
+	Created  time.Time `json:"created"`
+	LastSeen time.Time `json:"lastSeen"`
+	// Expires is the absolute end, however active the session is.
+	Expires time.Time `json:"expires"`
+}
+
 // KeyRecord is a stored API key.
 type KeyRecord struct {
 	ID      string    `json:"id"`
@@ -381,6 +435,9 @@ var (
 	// ErrQuotaExceeded: the write would take the bucket over its quota.
 	ErrQuotaExceeded = errors.New("bucket quota exceeded")
 	ErrInvalidQuota  = errors.New("invalid quota")
+	ErrNoSuchUser    = errors.New("no such user")
+	ErrUserExists    = errors.New("user already exists")
+	ErrNoSuchSession = errors.New("no such session")
 	// ErrUploadLimitReached: an upload link has taken all the files it may.
 	ErrUploadLimitReached = errors.New("upload link has no uploads left")
 	ErrNoSuchWebhook      = errors.New("webhook not found")

@@ -106,6 +106,8 @@ type whoamiResponse struct {
 	TrashDays int `json:"trashDays"`
 	// MinQuotaBytes is the smallest bucket quota PATCH accepts.
 	MinQuotaBytes int64 `json:"minQuotaBytes"`
+	// User is set when signed in as a user (session token), not a key.
+	User string `json:"user,omitempty"`
 }
 
 // whoami tells a client which key it is using and what that key may do,
@@ -123,7 +125,7 @@ func (a *api) whoami(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, whoamiResponse{
 		KeyID: p.KeyID, Name: p.KeyName, Scopes: scopes, MaxObjectSize: a.maxObject,
-		TrashDays: a.trashDays(), MinQuotaBytes: a.minQuota,
+		TrashDays: a.trashDays(), MinQuotaBytes: a.minQuota, User: p.User,
 	})
 }
 

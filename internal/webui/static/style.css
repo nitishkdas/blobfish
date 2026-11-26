@@ -417,8 +417,12 @@ td.name > button:hover { color: var(--accent-text); }
 /* ---------- API keys ---------- */
 .page-head-text { flex: 1; min-width: 0; }
 .page-head-text h1 { display: flex; align-items: center; gap: 10px; }
-.key-dialog-body { display: grid; gap: 16px; }
-.key-dialog-body .field > input { width: 100%; }
+.form-dialog-body { display: grid; gap: 16px; }
+.form-dialog-body .field > input, .form-dialog-body .password-field { width: 100%; }
+.password-field { position: relative; display: flex; }
+.password-field input { flex: 1; min-width: 0; padding-right: 36px; }
+.password-field .reveal { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); }
+.field-help { font-size: 12px; font-weight: 400; color: var(--muted); }
 .scope-rows { display: grid; gap: 8px; }
 .scope-row { display: flex; gap: 8px; align-items: center; }
 .scope-row select { flex: 1; min-width: 0; }
@@ -584,3 +588,7 @@ body:has(.drop-page) { min-width: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Sign-in: switch between user name and API key */
+button.login-switch { margin-top: 14px; font-size: 13px; padding: 0; }
+button.login-switch:hover { text-decoration: underline; }

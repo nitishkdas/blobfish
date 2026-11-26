@@ -27,7 +27,7 @@ import (
 
 // Errors returned by this package. Frontends map them to API codes.
 var (
-	ErrUnauthenticated  = errors.New("missing or invalid API key")
+	ErrUnauthenticated  = errors.New("missing or invalid API key or session")
 	ErrSignatureInvalid = errors.New("presigned URL signature is invalid")
 	ErrSignatureExpired = errors.New("presigned URL has expired")
 	ErrInvalidScope     = errors.New("invalid scope")
@@ -113,10 +113,16 @@ type Target struct {
 // Principal is an authenticated caller.
 type Principal struct {
 	// KeyID and KeyName identify the API key; both are empty for a
-	// presigned URL.
+	// presigned URL. For a signed-in user they are "user:<name>" and the
+	// name, so things a user creates (links) stay theirs across sessions.
 	KeyID   string
 	KeyName string
-	Scopes  []Scope
+	// User and SessionID are set for a signed-in user (session token).
+	User      string
+	SessionID string
+	Scopes    []Scope
+	// sessionHash identifies the caller's own session, for logout.
+	sessionHash string
 	// presigned limits the principal to exactly one object.
 	presigned *Target
 }
@@ -144,9 +150,12 @@ type Authenticator interface {
 // Service is the native Authenticator plus API key management and URL
 // presigning.
 type Service struct {
-	keys   store.Keys
-	secret []byte
-	now    func() time.Time
+	keys     store.Keys
+	users    store.Users // nil: user sign-in is off
+	secret   []byte
+	now      func() time.Time
+	throttle throttle
+	hashing  chan struct{} // limits concurrent password hashing
 }
 
 var _ Authenticator = (*Service)(nil)
@@ -154,7 +163,7 @@ var _ Authenticator = (*Service)(nil)
 // NewService returns a Service that stores keys in keys and signs URLs with
 // secret.
 func NewService(keys store.Keys, secret []byte) *Service {
-	return &Service{keys: keys, secret: secret, now: time.Now}
+	return &Service{keys: keys, secret: secret, now: time.Now, hashing: make(chan struct{}, 2)}
 }
 
 // Authenticate implements Authenticator. A request carries either an
@@ -176,6 +185,9 @@ func (s *Service) Authenticate(r *http.Request, t Target) (Principal, error) {
 }
 
 func (s *Service) authenticateToken(ctx context.Context, token string) (Principal, error) {
+	if strings.HasPrefix(token, sessionPrefix) {
+		return s.authenticateSession(ctx, token)
+	}
 	if !strings.HasPrefix(token, tokenPrefix) {
 		return Principal{}, ErrUnauthenticated
 	}
