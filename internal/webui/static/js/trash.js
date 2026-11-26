@@ -3,7 +3,7 @@
 
 import { api, showError } from "./api.js";
 import { confirmDialog, dateFmtLong, formatSize, h, icon, iconButton, relativeTime, toast } from "./dom.js";
-import { navigate } from "./router.js";
+import { renderBucketHeader } from "./bucket.js";
 import { rerenderMain, state } from "./state.js";
 
 const PAGE = 100;
@@ -42,20 +42,15 @@ export function renderTrash() {
   const T = state.trash;
   const bucket = state.route.bucket;
   const days = state.me.trashDays;
-  const toFiles = () => navigate({ view: "files", bucket, prefix: "", page: 1 });
 
   return h("section", { class: "main", "aria-label": "Trash" },
+    renderBucketHeader(bucket, "trash"),
     h("div", { class: "toolbar" },
-      h("nav", { class: "crumbs", "aria-label": "Location" },
-        h("button", { onclick: toFiles }, bucket),
-        h("span", { class: "sep" }, "/"),
-        h("button", { "aria-current": "page" }, "Trash")),
-      h("div", { class: "toolbar-actions" },
-        h("button", { class: "with-icon", onclick: toFiles }, icon("left"), "Back to files"),
-        T.items.length > 0 && h("button", { class: "link danger", onclick: emptyTrash }, "Empty trash"))),
-    h("p", { class: "muted trash-note" }, days > 0
+      h("p", { class: "muted trash-note" }, days > 0
       ? `Deleted files stay here for ${days} day${days === 1 ? "" : "s"}, then are deleted for good. Share links work again when a file is restored.`
       : "Trash is turned off on this server, so deleted files are removed at once. Files deleted before that stay here until their time is up."),
+      h("div", { class: "toolbar-actions" },
+        T.items.length > 0 && h("button", { class: "danger", onclick: emptyTrash }, "Empty trash"))),
     !T.loaded ? h("p", { class: "empty" }, "Loading…")
       : T.items.length === 0 ? h("p", { class: "empty" }, "Trash is empty.")
         : renderTable(),

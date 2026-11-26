@@ -6,6 +6,7 @@ import { h, icon, iconButton, toast, wireDialogBackdrops } from "./dom.js";
 import { reload, renderFiles, showRoute } from "./files.js";
 import { describeScope, loadKeys, renderKeysPage } from "./keys.js";
 import { renderTrash, showTrash } from "./trash.js";
+import { renderSettings, showSettings } from "./settings.js";
 import { navigate, parseHash } from "./router.js";
 import { can, isServerAdmin, state, ui } from "./state.js";
 import { renderUploadPanel, stopAllUploads } from "./uploads.js";
@@ -86,11 +87,11 @@ function route() {
     navigate({ view: "home" }, { replace: true });
     return;
   }
-  if (r.view === "trash" && !can("w", r.bucket)) {
+  if ((r.view === "trash" || r.view === "settings") && !can("w", r.bucket)) {
     navigate({ view: "files", bucket: r.bucket, prefix: "", page: 1 }, { replace: true });
     return;
   }
-  if ((r.view === "files" || r.view === "trash") && !state.buckets.some((b) => b.name === r.bucket)) {
+  if (["files", "trash", "settings"].includes(r.view) && !state.buckets.some((b) => b.name === r.bucket)) {
     if (r.bucket) toast(`No bucket “${r.bucket}” for this key.`, { error: true });
     navigate({ view: "home" }, { replace: true });
     return;
@@ -104,6 +105,7 @@ function route() {
   if (r.view === "files") showRoute(r); // resets the listing synchronously, then loads
   if (r.view === "keys") loadKeys();
   if (r.view === "trash") showTrash(r);
+  if (r.view === "settings") showSettings(r);
   renderApp();
 }
 
@@ -132,7 +134,7 @@ function renderSidebar() {
     : h("ul", {}, state.buckets.map((b) =>
       h("li", {}, h("a", {
         href: `#/b/${encodeURIComponent(b.name)}/`,
-        "aria-current": (r.view === "files" || r.view === "trash") && b.name === r.bucket ? "true" : "false",
+        "aria-current": ["files", "trash", "settings"].includes(r.view) && b.name === r.bucket ? "true" : "false",
       }, h("span", { class: "bucket-name" }, b.name),
       b.public && h("span", { class: "public-mark", title: "Public: files can be read without a key" }, icon("globe", 14))))));
 
@@ -179,6 +181,7 @@ function renderMain() {
   if (r.view === "keys") return renderKeysPage();
   if (r.view === "files" && can("r", r.bucket)) return renderFiles();
   if (r.view === "trash" && can("w", r.bucket)) return renderTrash();
+  if (r.view === "settings" && can("w", r.bucket)) return renderSettings();
   return h("section", { class: "main", "aria-label": "Files" },
     h("p", { class: "empty" }, isServerAdmin() ? "Create a bucket to get started." : "Nothing to show for this key."));
 }

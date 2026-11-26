@@ -11,8 +11,8 @@ export async function openUploadLinks(bucket, folder) {
   const dialog = document.getElementById("uplinks");
   const list = document.getElementById("uplinks-list");
   document.getElementById("uplinks-title").textContent = `Upload links for “${bucket}”`;
-  document.getElementById("uplinks-folder").textContent =
-    `Files will go to ${folder ? `the folder “${folder}”` : "the top of the bucket"}. Names already taken get a number added, like “report (2).pdf”.`;
+  const folderEl = document.getElementById("uplinks-folder");
+  folderEl.value = folder;
 
   let links = [];
   const render = () => {
@@ -68,7 +68,7 @@ export async function openUploadLinks(bucket, folder) {
   const create = document.getElementById("uplinks-create");
   create.onclick = async () => {
     const body = {
-      bucket, folder, label: labelEl.value.trim(),
+      bucket, folder: folderEl.value.trim(), label: labelEl.value.trim(),
       expiresIn: Number(document.getElementById("uplinks-ttl").value),
       maxFiles: Math.max(0, Math.floor(Number(filesEl.value) || 0)),
       maxFileSize: Math.max(0, Math.round((Number(sizeEl.value) || 0) * MB)),

@@ -57,9 +57,12 @@
       <ul id="uplinks-list" class="share-links"></ul>
       <div>
         <h3 class="section-title">New link</h3>
-        <p class="muted" id="uplinks-folder"></p>
+        <p class="muted">Names already taken get a number added, like “report (2).pdf”.</p>
       </div>
       <div class="uplink-form">
+        <label class="field">Folder files go into (empty = top of the bucket)
+          <input id="uplinks-folder" autocomplete="off" spellcheck="false" placeholder="e.g. inbox/acme">
+        </label>
         <label class="field">Title shown to uploaders (optional)
           <input id="uplinks-label" maxlength="200" autocomplete="off" placeholder="e.g. Receipts for ACME">
         </label>

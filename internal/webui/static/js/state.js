@@ -24,6 +24,9 @@ export const state = {
   // The trash on screen (trash.js), newest first.
   trash: { bucket: null, items: [], nextCursor: "", loaded: false },
 
+  // The Settings page's lists (settings.js); null while loading.
+  settings: { bucket: null, uploadLinks: null, webhooks: null },
+
   // Upload queue, shown in the docked panel. Jobs run one at a time and
   // remember their own bucket, so browsing elsewhere doesn't disturb them.
   uploads: [],

@@ -6,10 +6,10 @@ import {
   relativeTime, toast,
 } from "./dom.js";
 import { navigate } from "./router.js";
-import { PAGE_SIZES, bucketInfo, can, isServerAdmin, rerenderMain, state, ui } from "./state.js";
+import { PAGE_SIZES, bucketInfo, can, rerenderMain, state } from "./state.js";
 import { pickAndUpload, wireDrop } from "./uploads.js";
 import { openUploadLinks } from "./uplinks.js";
-import { openWebhooks } from "./webhooks.js";
+import { renderBucketHeader } from "./bucket.js";
 
 // ---------- Loading ----------
 
@@ -90,44 +90,18 @@ export function renderFiles() {
   const canWrite = can("w", r.bucket);
   if (canWrite) wireDrop(main);
 
-  const isPublic = bucketInfo(r.bucket)?.public;
   main.append(
+    renderBucketHeader(r.bucket, "files"),
     h("div", { class: "toolbar" },
       renderCrumbs(),
-      isPublic && h("span", { class: "chip public-chip", title: "Files in this bucket can be read without a key" },
-        icon("globe", 14), "Public"),
-      corsChip(r.bucket),
-      usageChip(r.bucket),
       h("div", { class: "toolbar-actions" },
-        canWrite && !r.prefix && h("button", {
-          class: "link with-icon", title: "Deleted files you can still restore",
-          onclick: () => navigate({ view: "trash", bucket: r.bucket }),
-        }, icon("trash"), "Trash"),
         canWrite && h("button", {
           class: "link", onclick: () => openUploadLinks(r.bucket, r.prefix),
           title: "Let people without a key send files into this folder",
         }, "Upload links"),
         canWrite && h("button", { class: "with-icon", onclick: newFolder }, icon("folderPlus"), "New folder"),
         canWrite && h("button", { class: "with-icon", onclick: () => pickAndUpload({ folder: true }) }, icon("folder"), "Upload folder"),
-        canWrite && h("button", { class: "primary with-icon", onclick: () => pickAndUpload({ folder: false }) }, icon("upload"), "Upload"),
-        can("admin", r.bucket) && !r.prefix && h("button", {
-          class: "link", onclick: () => setVisibility(!isPublic),
-        }, isPublic ? "Make private" : "Make public"),
-        can("admin", r.bucket) && !r.prefix && h("button", {
-          class: "link", onclick: () => editBrowserAccess(r.bucket),
-          title: "Websites whose pages may upload to and download from this bucket directly",
-        }, "Browser access"),
-        can("admin", r.bucket) && !r.prefix && h("button", {
-          class: "link", onclick: () => openWebhooks(r.bucket),
-          title: "Tell your apps when files are added, deleted or restored",
-        }, "Webhooks"),
-        isServerAdmin() && !r.prefix && h("button", {
-          class: "link", onclick: () => editQuota(r.bucket),
-          title: "Limit how much this bucket may store",
-        }, "Quota"),
-        can("admin", r.bucket) && !r.prefix && h("button", {
-          class: "link danger", onclick: deleteBucket, title: "Only empty buckets can be deleted",
-        }, "Delete bucket"))),
+        canWrite && h("button", { class: "primary with-icon", onclick: () => pickAndUpload({ folder: false }) }, icon("upload"), "Upload"))),
     L.loaded ? renderTable(canWrite) : h("p", { class: "empty" }, "Loading…"),
     L.loaded && renderPager());
   return main;
@@ -136,7 +110,8 @@ export function renderFiles() {
 function renderCrumbs() {
   const r = state.route;
   const parts = r.prefix.split("/").filter(Boolean);
-  const crumbs = [h("button", { onclick: () => go({ prefix: "", page: 1 }) }, r.bucket)];
+  const crumbs = [h("button", { class: "with-icon", onclick: () => go({ prefix: "", page: 1 }), "aria-current": parts.length ? null : "page" },
+    icon("folder", 16), "All files")];
   parts.forEach((p, i) => {
     const prefix = parts.slice(0, i + 1).join("/") + "/";
     const last = i === parts.length - 1;
@@ -178,7 +153,7 @@ function renderTable(canWrite) {
           canWrite && iconButton("trash", `Delete ${name}`, () => deleteObject(o), "danger")));
     }),
   ];
-  return h("table", {},
+  return h("table", { class: "files-table" },
     h("thead", {}, h("tr", {},
       h("th", { scope: "col" }, "Name"),
       h("th", { scope: "col", class: "num" }, "Size"),
@@ -338,141 +313,11 @@ async function share(o) {
   await load();
 }
 
-// usageChip shows what the bucket's files take, against its quota if it
-// has one. Trash is not counted, matching the server.
-function usageChip(bucket) {
-  const b = bucketInfo(bucket);
-  if (!b) return null;
-  const files = `${formatInt(b.objects)} file${b.objects === 1 ? "" : "s"}`;
-  if (!b.quotaBytes) {
-    return h("span", { class: "chip usage-chip", title: "Space used by this bucket's files (trash not counted)" },
-      `${formatSize(b.usedBytes)} · ${files}`);
-  }
-  const pct = Math.min(100, Math.round((b.usedBytes / b.quotaBytes) * 100));
-  return h("span", {
-    class: pct >= 90 ? "chip usage-chip near-full" : "chip usage-chip",
-    title: `${files}, ${pct}% of the quota (trash not counted). Uploads that don't fit are refused.`,
-  }, `${formatSize(b.usedBytes)} of ${formatSize(b.quotaBytes)}`);
-}
 
-// editQuota lets a server admin cap the bucket's size, in GB.
-async function editQuota(bucket) {
-  const GB = 1024 ** 3;
-  const current = bucketInfo(bucket)?.quotaBytes || 0;
-  const res = await ask({
-    title: `Quota for “${bucket}”`,
-    body: [h("p", { class: "muted" },
-      "Uploads that would take the bucket past this size are refused. Files in trash don't count. Leave empty for no limit.")],
-    input: {
-      label: "Maximum size in GB",
-      value: current ? String(+(current / GB).toFixed(3)) : "",
-      placeholder: "no limit",
-      validate: (v) => (v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0) ? "" : "Enter a number of GB, or leave empty."),
-    },
-    choices: [{ label: "Cancel", value: "" }, { label: "Save", value: "ok", kind: "primary" }],
-  });
-  if (!res) return;
-  const quotaBytes = res.value === "" ? 0 : Math.round(Number(res.value) * GB);
-  try {
-    await api("PATCH", `/v1/buckets/${encodeURIComponent(bucket)}`, { body: { quotaBytes } });
-    state.buckets = (await api("GET", "/v1/buckets")).buckets;
-    toast(quotaBytes ? `Quota set to ${formatSize(quotaBytes)}` : "Quota removed");
-    rerenderMain();
-  } catch (err) { showError(err); }
-}
 
-function corsChip(bucket) {
-  const origins = bucketInfo(bucket)?.corsOrigins || [];
-  if (origins.length === 0) return null;
-  const label = origins.includes("*") ? "Browser: any site" : `Browser: ${origins.length} site${origins.length === 1 ? "" : "s"}`;
-  return h("span", { class: "chip cors-chip", title: `Web pages on these sites may call this bucket:\n${origins.join("\n")}` },
-    icon("globe", 14), label);
-}
 
-// originOf returns the exact origin a browser would send for what the user
-// typed, or an error message. "*" means any site.
-function originOf(input) {
-  const v = input.trim().toLowerCase();
-  if (v === "*") return { origin: "*" };
-  let u;
-  try { u = new URL(v); } catch { return { error: "Enter a full address like https://app.example.com." }; }
-  if (u.protocol !== "https:" && u.protocol !== "http:") return { error: "Only http:// and https:// sites can be added." };
-  if (v.replace(/\/$/, "") !== u.origin || u.username || u.search || u.hash) {
-    return { error: `Use just the site, without a path: ${u.origin}` };
-  }
-  return { origin: u.origin };
-}
 
-// editBrowserAccess edits which websites' pages may call this bucket from a
-// browser, e.g. to upload straight to a presigned URL from your app.
-async function editBrowserAccess(bucket) {
-  const dialog = document.getElementById("cors");
-  const list = document.getElementById("cors-list");
-  const input = document.getElementById("cors-input");
-  const error = document.getElementById("cors-error");
-  const warn = document.getElementById("cors-warn");
-  let origins = [...(bucketInfo(bucket)?.corsOrigins || [])];
 
-  document.getElementById("cors-title").textContent = `Browser access to “${bucket}”`;
-  const render = () => {
-    list.replaceChildren(...(origins.length
-      ? origins.map((o) => h("li", {},
-        h("span", { class: "mono" }, o === "*" ? "* (any website)" : o),
-        iconButton("close", `Remove ${o}`, () => { origins = origins.filter((x) => x !== o); render(); })))
-      : [h("li", { class: "muted" }, "No websites: pages on other sites can't call this bucket.")]));
-    warn.hidden = !origins.includes("*");
-  };
-  const add = () => {
-    const { origin, error: problem } = originOf(input.value);
-    error.textContent = problem || "";
-    if (!origin) return;
-    if (!origins.includes(origin)) origins = [...origins, origin].sort();
-    input.value = "";
-    render();
-    input.focus();
-  };
-  document.getElementById("cors-add").onclick = add;
-  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } };
-  document.getElementById("cors-save").onclick = async () => {
-    if (input.value.trim()) { add(); if (error.textContent) return; } // typed but not added yet
-    try {
-      await api("PATCH", `/v1/buckets/${encodeURIComponent(bucket)}`, { body: { corsOrigins: origins } });
-      state.buckets = (await api("GET", "/v1/buckets")).buckets;
-      dialog.close();
-      toast(origins.length ? `Browser access saved for ${bucket}` : `Browser access turned off for ${bucket}`);
-      ui.renderApp();
-    } catch (err) { showError(err); }
-  };
-  input.value = "";
-  error.textContent = "";
-  render();
-  dialog.showModal();
-  input.focus();
-}
-
-async function setVisibility(makePublic) {
-  const bucket = state.route.bucket;
-  const ok = await confirmDialog(makePublic ? {
-    title: `Make “${bucket}” public?`,
-    body: [
-      "Anyone who has, or guesses, a file's address can download it without a key. Listing, uploading and deleting still need a key.",
-      "Use this for website or app assets, not for private documents.",
-    ],
-    confirmLabel: "Make public",
-  } : {
-    title: `Make “${bucket}” private?`,
-    body: ["Public addresses to its files stop working immediately. Share links keep working."],
-    confirmLabel: "Make private",
-    danger: false,
-  });
-  if (!ok) return;
-  try {
-    await api("PATCH", `/v1/buckets/${encodeURIComponent(bucket)}`, { body: { public: makePublic } });
-    state.buckets = (await api("GET", "/v1/buckets")).buckets;
-    toast(makePublic ? `${bucket} is now public` : `${bucket} is now private`);
-    ui.renderApp();
-  } catch (err) { showError(err); }
-}
 
 function showDetails(o) {
   const dialog = document.getElementById("details");
@@ -544,19 +389,3 @@ async function newFolder() {
   go({ prefix: state.route.prefix + name + "/", page: 1 });
 }
 
-async function deleteBucket() {
-  const bucket = state.route.bucket;
-  const ok = await confirmDialog({
-    title: `Delete bucket “${bucket}”?`,
-    body: ["Only an empty bucket can be deleted, with an empty trash. This can't be undone."],
-    confirmLabel: "Delete bucket",
-  });
-  if (!ok) return;
-  try {
-    await api("DELETE", `/v1/buckets/${encodeURIComponent(bucket)}`);
-    toast(`Deleted bucket ${bucket}`);
-    state.buckets = (await api("GET", "/v1/buckets")).buckets;
-    navigate({ view: "home" });
-    ui.renderApp();
-  } catch (err) { showError(err); }
-}
