@@ -32,6 +32,7 @@ type Options struct {
 	Links       store.Links
 	Trash       store.Trash
 	UploadLinks store.UploadLinks
+	Webhooks    store.Webhooks
 	Backup      store.Backuper
 	Health      store.HealthChecker
 	// Version and DataFormat are reported by GET /v1/status.
@@ -51,6 +52,7 @@ type api struct {
 	links    store.Links
 	trash    store.Trash
 	uplinks  store.UploadLinks
+	webhooks store.Webhooks
 	backuper store.Backuper
 	health   store.HealthChecker
 	stats    *serverStats
@@ -71,6 +73,7 @@ func New(opts Options) http.Handler {
 		links:      opts.Links,
 		trash:      opts.Trash,
 		uplinks:    opts.UploadLinks,
+		webhooks:   opts.Webhooks,
 		backuper:   opts.Backup,
 		health:     opts.Health,
 		stats:      &serverStats{started: time.Now()},
@@ -108,6 +111,10 @@ func New(opts Options) http.Handler {
 	mux.Handle("GET /u/{token}", webui.UploadPage())
 	mux.HandleFunc("GET /u/{token}/info", a.uploadLinkInfo)
 	mux.HandleFunc("PUT /u/{token}/{name}", a.uploadViaLink)
+	mux.HandleFunc("POST /v1/webhooks", a.createWebhook)
+	mux.HandleFunc("GET /v1/webhooks", a.listWebhooks)
+	mux.HandleFunc("DELETE /v1/webhooks/{id}", a.deleteWebhook)
+	mux.HandleFunc("POST /v1/webhooks/{id}/test", a.testWebhook)
 	mux.HandleFunc("POST /v1/presign", a.presign)
 	mux.HandleFunc("GET /v1/keys", a.listKeys)
 	mux.HandleFunc("POST /v1/keys", a.createKey)

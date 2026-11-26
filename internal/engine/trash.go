@@ -201,6 +201,7 @@ func (e *Engine) RestoreTrash(ctx context.Context, bucket, id string) (store.Obj
 	if err := store.ValidateBucketName(bucket); err != nil {
 		return info, err
 	}
+	var queued bool
 	err := e.db.Update(func(tx *bbolt.Tx) error {
 		objs, err := objectsOf(tx, bucket)
 		if err != nil {
@@ -214,6 +215,9 @@ func (e *Engine) RestoreTrash(ctx context.Context, bucket, id string) (store.Obj
 			return fmt.Errorf("%w: %s/%s; delete or rename it first", store.ErrKeyExists, bucket, r.Key)
 		}
 		if err := adjustUsage(tx, bucket, r.Object.Size, 1, true); err != nil {
+			return err
+		}
+		if queued, err = e.queueEvent(tx, objectEvent(store.EventObjectRestored, bucket, r.Key, r.Object), ""); err != nil {
 			return err
 		}
 		val, err := json.Marshal(r.Object)
@@ -237,6 +241,9 @@ func (e *Engine) RestoreTrash(ctx context.Context, bucket, id string) (store.Obj
 	})
 	if err != nil {
 		return info, fmt.Errorf("restore from trash: %w", err)
+	}
+	if queued {
+		e.signalEvents()
 	}
 	return info, nil
 }

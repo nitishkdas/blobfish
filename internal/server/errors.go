@@ -50,6 +50,8 @@ const (
 	CodeQuotaExceeded      = "QuotaExceeded"
 	CodeUploadLimit        = "UploadLimitReached"
 	CodePreconditionFailed = "PreconditionFailed"
+	CodeNoSuchWebhook      = "NoSuchWebhook"
+	CodeTooManyWebhooks    = "TooManyWebhooks"
 )
 
 // errorMapping lists, in order, how internal errors become API errors. This
@@ -81,6 +83,8 @@ var errorMapping = []struct {
 	{store.ErrQuotaExceeded, http.StatusInsufficientStorage, CodeQuotaExceeded},
 	{store.ErrInvalidQuota, http.StatusBadRequest, CodeInvalidRequest},
 	{store.ErrUploadLimitReached, http.StatusForbidden, CodeUploadLimit},
+	{store.ErrNoSuchWebhook, http.StatusNotFound, CodeNoSuchWebhook},
+	{store.ErrTooManyWebhooks, http.StatusConflict, CodeTooManyWebhooks},
 	{errLinkExpired, http.StatusGone, CodeLinkExpired},
 	{auth.ErrUnauthenticated, http.StatusUnauthorized, CodeUnauthorized},
 	{auth.ErrSignatureInvalid, http.StatusForbidden, CodeSignatureInvalid},

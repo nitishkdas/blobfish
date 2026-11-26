@@ -32,7 +32,9 @@ export async function api(method, path, { body, key = session.key } = {}) {
     if (res.status === 401 && key === session.key) session.onUnauthorized();
     throw err;
   }
-  return res.status === 204 ? null : res.json();
+  // 204, or any answer without a body, has nothing to parse.
+  const text = res.status === 204 ? "" : await res.text();
+  return text ? JSON.parse(text) : null;
 }
 
 // objectExists reports true, false, or null when it can't tell (for

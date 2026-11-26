@@ -402,3 +402,7 @@ label.button:focus-within { outline: 2px solid var(--accent); outline-offset: 2p
 .uplink-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
 .uplink-form .field:first-child { grid-column: 1 / -1; }
 .uplink-form input, .uplink-form select { width: 100%; }
+.webhook-events { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.webhook-events legend { padding: 0; margin-bottom: 4px; }
+.share-meta.failing { color: var(--danger); }
+.share-link > .share-meta { display: block; }

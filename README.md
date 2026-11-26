@@ -80,6 +80,36 @@ Scopes are `<bucket>:<r|w|rw|admin>`, with `*` for every bucket. Creating
 buckets and managing keys needs `*:admin`. Errors always look like
 `{"error":{"code":"NoSuchKey","message":"...","requestId":"..."}}`.
 
+## Webhooks
+
+BlobFish can tell your app when files in a bucket are added, deleted or
+restored. A bucket admin registers an address; the response carries a signing
+secret, shown only once:
+
+```sh
+curl -X POST -H "$H" -d '{"bucket":"invoices","url":"https://app.example.com/hooks/blobfish"}' \
+     localhost:8080/v1/webhooks
+```
+
+Each event is a JSON `POST` such as
+`{"id":"…","type":"object.created","time":"…","bucket":"invoices","key":"2026/inv.pdf","size":48213,"etag":"…"}`
+with `X-BlobFish-Event`, `X-BlobFish-Delivery` (the event id) and
+`X-BlobFish-Signature: t=<unix time>,v1=<hex HMAC-SHA256 of "<t>.<body>">`.
+Check it before trusting the body, for example in Python:
+
+```python
+t, v1 = (p.split("=", 1)[1] for p in request.headers["X-BlobFish-Signature"].split(","))
+good = hmac.compare_digest(v1, hmac.new(secret, f"{t}.".encode() + body, "sha256").hexdigest())
+fresh = abs(time.time() - int(t)) < 300   # reject replays
+```
+
+Events are saved together with the change they describe, so a crash or a
+restart never loses one. If your app is down they wait (up to 10,000 per
+webhook) and are retried with backoff for about a day, in order. An event can
+arrive twice, so de-duplicate on its id. Webhooks created with a bucket admin
+key may only call public addresses; a server admin key may also call an app on
+the same machine (`http://127.0.0.1:…`).
+
 ## Uploading straight from your web pages
 
 Your app's backend keeps the API key and only signs URLs; the user's browser

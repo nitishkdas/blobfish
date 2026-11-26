@@ -9,6 +9,7 @@ import { navigate } from "./router.js";
 import { PAGE_SIZES, bucketInfo, can, isServerAdmin, rerenderMain, state, ui } from "./state.js";
 import { pickAndUpload, wireDrop } from "./uploads.js";
 import { openUploadLinks } from "./uplinks.js";
+import { openWebhooks } from "./webhooks.js";
 
 // ---------- Loading ----------
 
@@ -116,6 +117,10 @@ export function renderFiles() {
           class: "link", onclick: () => editBrowserAccess(r.bucket),
           title: "Websites whose pages may upload to and download from this bucket directly",
         }, "Browser access"),
+        can("admin", r.bucket) && !r.prefix && h("button", {
+          class: "link", onclick: () => openWebhooks(r.bucket),
+          title: "Tell your apps when files are added, deleted or restored",
+        }, "Webhooks"),
         isServerAdmin() && !r.prefix && h("button", {
           class: "link", onclick: () => editQuota(r.bucket),
           title: "Limit how much this bucket may store",

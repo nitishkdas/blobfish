@@ -61,6 +61,81 @@ type Links interface {
 	DeleteLink(ctx context.Context, id string) error
 }
 
+// Event types sent to webhooks.
+const (
+	EventObjectCreated  = "object.created"  // new object or overwrite
+	EventObjectDeleted  = "object.deleted"  // deleted, or moved to trash
+	EventObjectRestored = "object.restored" // put back from trash
+	EventPing           = "ping"            // a test sent on request
+)
+
+// EventTypes are the types a webhook can subscribe to.
+var EventTypes = []string{EventObjectCreated, EventObjectDeleted, EventObjectRestored}
+
+// Webhooks stores per-bucket webhooks. Events are queued in the same
+// transaction as the change they describe, so none is lost to a crash;
+// delivery reads them from the Outbox.
+type Webhooks interface {
+	CreateWebhook(ctx context.Context, rec WebhookRecord) error
+	// WebhookByID returns ErrNoSuchWebhook when nothing matches.
+	WebhookByID(ctx context.Context, id string) (WebhookRecord, error)
+	ListWebhooks(ctx context.Context, bucket string) ([]WebhookRecord, error)
+	// DeleteWebhook removes the webhook and its undelivered events.
+	DeleteWebhook(ctx context.Context, id string) error
+	// QueueTestEvent queues a "ping" event for one webhook.
+	QueueTestEvent(ctx context.Context, id string) error
+}
+
+// WebhookRecord is a stored webhook and its delivery health.
+type WebhookRecord struct {
+	ID     string   `json:"id"`
+	Bucket string   `json:"bucket"`
+	URL    string   `json:"url"`
+	Secret string   `json:"secret"` // HMAC key for signatures; needed as-is
+	Events []string `json:"events"`
+	// AllowPrivate lets deliveries go to loopback and private addresses.
+	// Set only for webhooks made by server admins.
+	AllowPrivate  bool      `json:"allowPrivate,omitempty"`
+	Created       time.Time `json:"created"`
+	CreatedBy     string    `json:"createdBy"`
+	CreatedByName string    `json:"createdByName"`
+
+	Pending     int       `json:"pending"` // queued, not yet delivered
+	Dropped     int       `json:"dropped"` // not queued: too many pending
+	GaveUp      int       `json:"gaveUp"`  // failed every retry
+	LastSuccess time.Time `json:"lastSuccess,omitzero"`
+	LastFailure time.Time `json:"lastFailure,omitzero"`
+	LastError   string    `json:"lastError,omitempty"`
+	// RetryAfter pauses all deliveries to this webhook after a failure,
+	// so events wait in order instead of each hitting a dead receiver.
+	RetryAfter time.Time `json:"retryAfter,omitzero"`
+}
+
+// Outbox hands queued webhook events to the dispatcher.
+type Outbox interface {
+	// DueDeliveries returns up to limit deliveries whose time has come,
+	// oldest first.
+	DueDeliveries(ctx context.Context, now time.Time, limit int) ([]Delivery, error)
+	DeliverySucceeded(ctx context.Context, seq uint64, at time.Time) error
+	// DeliveryFailed records a failed attempt; retryAt zero means give up.
+	DeliveryFailed(ctx context.Context, seq uint64, at time.Time, problem string, retryAt time.Time) error
+	// EventSignal receives a value after events are queued.
+	EventSignal() <-chan struct{}
+}
+
+// Delivery is one event on its way to one webhook.
+type Delivery struct {
+	Seq          uint64
+	WebhookID    string
+	URL          string
+	Secret       string
+	AllowPrivate bool
+	EventID      string
+	EventType    string
+	Payload      []byte // the JSON body to send
+	Attempts     int    // failed attempts so far
+}
+
 // UploadLinks stores upload links: URLs that let someone without a key
 // add files to one folder of a bucket, never read or replace anything.
 type UploadLinks interface {
@@ -308,4 +383,7 @@ var (
 	ErrInvalidQuota  = errors.New("invalid quota")
 	// ErrUploadLimitReached: an upload link has taken all the files it may.
 	ErrUploadLimitReached = errors.New("upload link has no uploads left")
+	ErrNoSuchWebhook      = errors.New("webhook not found")
+	// ErrTooManyWebhooks: a bucket has MaxWebhooksPerBucket already.
+	ErrTooManyWebhooks = errors.New("too many webhooks for this bucket")
 )

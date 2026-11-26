@@ -20,6 +20,7 @@ import (
 	"github.com/nitishkdas/blobfish/internal/config"
 	"github.com/nitishkdas/blobfish/internal/engine"
 	"github.com/nitishkdas/blobfish/internal/server"
+	"github.com/nitishkdas/blobfish/internal/webhook"
 )
 
 // version is set at build time with -ldflags "-X main.version=v1.2.3".
@@ -100,7 +101,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	janitorCtx, stopJanitor := context.WithCancel(context.Background())
 	var janitor sync.WaitGroup
 	janitor.Go(func() { eng.JanitorLoop(janitorCtx, janitorInterval) })
-	// Stop the janitor before the deferred Close runs.
+	janitor.Go(func() { webhook.New(eng, log, version).Run(janitorCtx) })
+	// Stop the janitor and webhook dispatcher before the deferred Close runs.
 	defer janitor.Wait()
 	defer stopJanitor()
 
@@ -126,6 +128,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			Links:          eng,
 			Trash:          eng,
 			UploadLinks:    eng,
+			Webhooks:       eng,
 			Backup:         eng,
 			Health:         eng,
 			Version:        version,

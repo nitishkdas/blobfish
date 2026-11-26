@@ -58,6 +58,7 @@ func newTestAPIWith(t *testing.T, opts engine.Options) *testAPI {
 		Links:         eng,
 		Trash:         eng,
 		UploadLinks:   eng,
+		Webhooks:      eng,
 		PublicURL:     "https://files.example.com",
 	})
 	return &testAPI{t: t, h: h, auth: svc, eng: eng, admin: admin}

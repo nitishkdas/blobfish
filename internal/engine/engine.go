@@ -7,7 +7,8 @@
 //	                     "keys/<token hash>", "settings",
 //	                     "links/<token>", "linkidx/<bucket>\x00<key>\x00<id>" -> token,
 //	                     "trash/<bucket>/<trash id>" (deleted objects, see trash.go),
-//	                     "uplinks/<token>" (upload links, see uplinks.go)
+//	                     "uplinks/<token>" (upload links, see uplinks.go),
+//	                     "webhooks/<id>", "outbox/<seq>" (see webhooks.go)
 //	objects/ab/cd/<id>   object bytes, random 32-hex-char IDs
 //	tmp/                 uploads in progress
 //
@@ -76,6 +77,8 @@ type Engine struct {
 	presignSecret       []byte
 	minFree             int64
 	trashRetention      time.Duration
+	// events wakes the webhook dispatcher after events are queued.
+	events chan struct{}
 	// freeSpace reports free bytes on the data disk; tests replace it.
 	freeSpace func() (uint64, error)
 
@@ -151,6 +154,7 @@ func Open(dir string, opts Options) (*Engine, error) {
 		minFree:  opts.MinFreeBytes,
 
 		trashRetention: opts.TrashRetention,
+		events:         make(chan struct{}, 1),
 	}
 	e.freeSpace = func() (uint64, error) { return diskFree(dir) }
 	for _, d := range []string{dir, e.objDir, e.tmpDir} {
@@ -170,7 +174,7 @@ func Open(dir string, opts Options) (*Engine, error) {
 	}
 	var formatBefore int
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx, bktTrash, bktUplinks} {
+		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx, bktTrash, bktUplinks, bktWebhooks, bktOutbox} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}

@@ -84,6 +84,36 @@
       </div>
     </form>
   </dialog>
+  <dialog id="webhooks">
+    <form method="dialog" class="dialog share-dialog">
+      <h2 id="webhooks-title" class="break">Webhooks</h2>
+      <p class="muted">BlobFish sends a signed POST to each address when files in this bucket are added, deleted or restored. Events wait and are retried if your app is down.</p>
+      <ul id="webhooks-list" class="share-links"></ul>
+      <section id="webhooks-secret" class="share-public" hidden>
+        <p><strong>Signing secret.</strong> Copy it now: it is not shown again. Your app uses it to check the <span class="mono">X-BlobFish-Signature</span> header.</p>
+        <div class="row">
+          <input id="webhooks-secret-value" class="mono" readonly aria-label="Signing secret">
+          <button type="button" id="webhooks-secret-copy">Copy</button>
+        </div>
+      </section>
+      <div>
+        <h3 class="section-title">New webhook</h3>
+      </div>
+      <label class="field">Address
+        <input id="webhooks-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://app.example.com/hooks/blobfish">
+      </label>
+      <fieldset class="webhook-events">
+        <legend class="muted">Send</legend>
+        <label class="check"><input type="checkbox" value="object.created" checked> Added or replaced</label>
+        <label class="check"><input type="checkbox" value="object.deleted" checked> Deleted</label>
+        <label class="check"><input type="checkbox" value="object.restored" checked> Restored from trash</label>
+      </fieldset>
+      <div class="row end">
+        <button value="close">Close</button>
+        <button type="button" id="webhooks-create" class="primary">Add webhook</button>
+      </div>
+    </form>
+  </dialog>
   <!-- One dialog for confirm / choice / prompt; filled by ask() in js/dom.js. -->
   <dialog id="ask">
     <form method="dialog" class="dialog">

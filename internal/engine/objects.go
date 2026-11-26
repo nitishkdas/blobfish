@@ -151,6 +151,7 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 		return store.ObjectInfo{}, fmt.Errorf("encode object record: %w", err)
 	}
 	var oldBlob string
+	var queued bool
 	err = e.db.Update(func(tx *bbolt.Tx) error {
 		objs, err := objectsOf(tx, bucket)
 		if err != nil {
@@ -179,13 +180,21 @@ func (e *Engine) Put(ctx context.Context, bucket, key string, r io.Reader, meta 
 			return err
 		}
 		if oldBlob != "" {
-			return blobs.Delete([]byte(oldBlob))
+			if err := blobs.Delete([]byte(oldBlob)); err != nil {
+				return err
+			}
 		}
-		return nil
+		ev := objectEvent(store.EventObjectCreated, bucket, key, rec)
+		ev.Replaced = oldBlob != ""
+		queued, err = e.queueEvent(tx, ev, "")
+		return err
 	})
 	if err != nil {
 		os.Remove(final)
 		return store.ObjectInfo{}, fmt.Errorf("commit %s/%s: %w", bucket, key, err)
+	}
+	if queued {
+		e.signalEvents()
 	}
 	if e.crashAt("put:committed") {
 		return store.ObjectInfo{}, errSimulatedCrash
@@ -266,6 +275,7 @@ func (e *Engine) Delete(ctx context.Context, bucket, key string) error {
 		return err
 	}
 	var blob string
+	var queued bool
 	err := e.db.Update(func(tx *bbolt.Tx) error {
 		objs, err := objectsOf(tx, bucket)
 		if err != nil {
@@ -286,6 +296,11 @@ func (e *Engine) Delete(ctx context.Context, bucket, key string) error {
 		if err := adjustUsage(tx, bucket, -rec.Size, -1, false); err != nil {
 			return err
 		}
+		ev := objectEvent(store.EventObjectDeleted, bucket, key, rec)
+		ev.Trash = e.trashRetention > 0
+		if queued, err = e.queueEvent(tx, ev, ""); err != nil {
+			return err
+		}
 		if e.trashRetention > 0 {
 			// The blob stays (and stays indexed) until the trash is purged.
 			return e.moveToTrash(tx, bucket, key, rec)
@@ -301,6 +316,9 @@ func (e *Engine) Delete(ctx context.Context, bucket, key string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("delete %s/%s: %w", bucket, key, err)
+	}
+	if queued {
+		e.signalEvents()
 	}
 	if blob == "" {
 		return nil
