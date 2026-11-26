@@ -143,9 +143,11 @@ function renderSidebar() {
       h("span", { class: "side-meta" }, formatSize(b.usedBytes || 0))))));
 
   return [
-    h("a", { class: "brand-row", href: "#/" },
-      h("img", { src: "favicon.svg", alt: "" }),
-      h("span", { class: "brand" }, "BlobFish")),
+    h("div", { class: "brand-row" },
+      h("a", { class: "brand-link", href: "#/" },
+        h("img", { src: "favicon.svg", alt: "" }),
+        h("span", { class: "brand" }, "BlobFish")),
+      themeToggle()),
     h("div", { class: "side-scroll" },
       h("div", { class: "side-section" },
         h("div", { class: "side-head" },
@@ -197,15 +199,7 @@ function renderProfile() {
     iconButton("signOut", "Sign out", () => signOut()));
 }
 
-// renderMain is the page on the right, with the theme switch in its
-// top-right corner (it scrolls away with the page header).
 function renderMain() {
-  const main = renderPage();
-  main.prepend(themeToggle());
-  return main;
-}
-
-function renderPage() {
   const r = state.route;
   if (r.view === "keys") return renderKeysPage();
   if (r.view === "files" && can("r", r.bucket)) return renderFiles();

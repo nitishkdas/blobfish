@@ -197,10 +197,12 @@ input[readonly] { background: var(--subtle); }
   border-right: 1px solid var(--line);
 }
 .brand-row {
-  display: flex; align-items: center; gap: 10px;
-  height: 60px; padding: 0 18px; flex: none;
-  color: var(--text); text-decoration: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  height: 60px; padding: 0 12px 0 18px; flex: none;
 }
+.brand-link { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; border-radius: 6px; }
+/* The theme switch: end of the sidebar's logo row; top right on sign-in. */
+.login .theme-toggle { position: fixed; top: 16px; right: 20px; }
 .brand-row img { width: 28px; height: 28px; }
 .brand { font-weight: 650; font-size: 15px; letter-spacing: -0.015em; }
 .side-scroll { flex: 1; overflow: auto; padding: 4px 10px 16px; min-height: 0; }
@@ -254,10 +256,6 @@ input[readonly] { background: var(--subtle); }
 }
 
 /* ---------- Page and bucket headers ---------- */
-/* The theme switch sits in .main's top-right corner (app.js). */
-.theme-toggle { position: absolute; top: 22px; right: 28px; z-index: 2; }
-.login .theme-toggle { position: fixed; top: 16px; right: 20px; }
-.bucket-title, .page-head { padding-right: 52px; }
 .bucket-head { margin-bottom: 20px; border-bottom: 1px solid var(--line); }
 .bucket-title { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
 .bucket-icon {
