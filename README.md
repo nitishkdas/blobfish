@@ -118,6 +118,21 @@ curl -H "Authorization: Bearer bf_..." http://localhost:8080/v1/backup -o backup
 Backups contain API key hashes and share-link tokens (so keys and links keep
 working after a restore): store them as carefully as the data itself.
 
+## Checking for disk damage
+
+Disks rot quietly. `blobfish verify` reads every file back from the disk and
+compares it with the SHA-256 recorded when it was uploaded. It also checks
+the metadata database. It changes nothing, and the server must be stopped.
+
+```sh
+sudo systemctl stop blobfish
+./blobfish verify                 # or: -bucket invoices
+sudo systemctl start blobfish
+```
+
+It prints one line per damaged file and exits 1 if it found any, so it can
+run from cron. Restore damaged files from a backup or upload them again.
+
 ## Configuration
 
 Settings come from built-in defaults, then an optional JSON file

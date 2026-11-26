@@ -48,6 +48,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			return runBackup(ctx, args[1:], getenv, stdout, stderr)
 		case "restore":
 			return runRestore(ctx, args[1:], getenv, stdout, stderr)
+		case "verify":
+			return runVerify(ctx, args[1:], getenv, stdout, stderr)
 		}
 	}
 	fs := flag.NewFlagSet("blobfish", flag.ContinueOnError)

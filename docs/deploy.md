@@ -150,6 +150,20 @@ Check a backup now and then by restoring it somewhere else:
 verifies its checksum. Backups contain key hashes and share-link tokens:
 store them as carefully as the data.
 
+Check the live data the same way every month or so. `blobfish verify` reads
+every file from disk against its SHA-256 and changes nothing; the server must
+be stopped while it runs (about as long as reading the whole disk once):
+
+```sh
+sudo systemctl stop blobfish
+sudo -u blobfish /usr/local/bin/blobfish verify -config /etc/blobfish/config.json
+sudo systemctl start blobfish
+```
+
+Exit 0 means every file matched. On exit 1 it lists each damaged file;
+restore those from a backup. If any line says `unindexed`, save those files
+before starting the server again, since it would delete them as leftovers.
+
 ## 7. Upgrade
 
 Stop the service, replace `/usr/local/bin/blobfish`, start it again. The data

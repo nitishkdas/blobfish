@@ -222,3 +222,53 @@ func waitHealthy(t *testing.T, addr string, done chan error) {
 	}
 	t.Fatal("server never came up")
 }
+
+func TestVerifyCommand(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	env := func(k string) string {
+		return map[string]string{"BLOBFISH_DATA_DIR": dataDir}[k]
+	}
+	eng, err := engine.Open(dataDir, engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	eng.CreateBucket(ctx, "cli-b")
+	eng.Put(ctx, "cli-b", "docs/a.txt", strings.NewReader("hello"), store.Meta{})
+
+	var stdout, stderr bytes.Buffer
+	if err := run(ctx, []string{"verify"}, env, &stdout, &stderr); err == nil ||
+		!strings.Contains(err.Error(), "stop it first") {
+		t.Fatalf("verify with the server running: err = %v", err)
+	}
+	eng.Close()
+
+	stdout.Reset()
+	if err := run(ctx, []string{"verify"}, env, &stdout, &stderr); err != nil {
+		t.Fatalf("verify: %v\n%s", err, stderr.String())
+	}
+	if !strings.HasPrefix(stdout.String(), "OK: 1 objects (5 B) across 1 bucket(s)") {
+		t.Errorf("clean output: %s", stdout.String())
+	}
+
+	// Rot one byte of the only blob.
+	var blob string
+	filepath.WalkDir(filepath.Join(dataDir, "objects"), func(p string, d os.DirEntry, _ error) error {
+		if !d.IsDir() {
+			blob = p
+		}
+		return nil
+	})
+	os.WriteFile(blob, []byte("jello"), 0o600)
+	stdout.Reset()
+	if err := run(ctx, []string{"verify"}, env, &stdout, &stderr); err != errVerifyFailed {
+		t.Fatalf("verify of damaged data: err = %v", err)
+	}
+	if out := stdout.String(); !strings.Contains(out, "checksum  cli-b/docs/a.txt: sha256 is") ||
+		!strings.Contains(out, "FAILED: 1 problem(s)") {
+		t.Errorf("damaged output: %s", out)
+	}
+	if err := run(ctx, []string{"verify", "extra"}, env, &stdout, &stderr); err == nil {
+		t.Error("verify accepted a stray argument")
+	}
+}
