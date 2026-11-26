@@ -30,20 +30,21 @@ export function renderKeysPage() {
   return h("section", { class: "main keys-page", "aria-label": "API keys" },
     h("header", { class: "page-head" },
       h("span", { class: "bucket-icon", "aria-hidden": "true" }, icon("key", 20)),
-      h("div", {},
-        h("h1", {}, "API keys"),
+      h("div", { class: "page-head-text" },
+        h("h1", {}, "API keys ", h("span", { class: "count" }, String(state.apiKeys.length))),
         h("p", { class: "muted" },
-          "Give each app its own key, limited to the buckets it needs. A key for one bucket gets “access denied” everywhere else."))),
-    h("div", { class: "settings-group" },
-      h("h2", { class: "group-title" }, "New key"),
-      renderKeyForm()),
-    h("div", { class: "settings-group" },
-      h("h2", { class: "group-title" }, "Keys ", h("span", { class: "count" }, String(state.apiKeys.length))),
-      renderKeyTable()));
+          "Give each app its own key, limited to the buckets it needs. A key for one bucket gets “access denied” everywhere else.")),
+      h("button", { class: "primary with-icon", onclick: openCreateKey }, icon("plus", 16), "Create key")),
+    renderKeyTable());
 }
 
-function renderKeyForm() {
-  const name = h("input", { required: true, maxlength: 64, placeholder: "e.g. app1 production", "aria-label": "Key name" });
+// openCreateKey shows the Create API key dialog with a fresh form: a name
+// and one or more bucket + permission rows.
+function openCreateKey() {
+  const dialog = document.getElementById("create-key");
+  const form = document.getElementById("create-key-form");
+  const submit = document.getElementById("create-key-submit");
+  const name = h("input", { required: true, maxlength: 64, placeholder: "e.g. billing app (production)", autocomplete: "off" });
   const rows = h("div", { class: "scope-rows" });
   const hint = h("p", { class: "hint", role: "status" });
 
@@ -70,36 +71,44 @@ function renderKeyForm() {
     rows.append(row);
     updateHint();
   };
-  addRow(state.route.bucket || state.buckets[0]?.name || "*");
+  addRow(state.buckets[0]?.name || "*");
 
-  const submit = h("button", { class: "primary", type: "submit" }, "Create key");
-  return h("form", {
-    class: "panel key-form",
-    onsubmit: async (ev) => {
-      ev.preventDefault();
-      const scopes = [...new Set([...rows.querySelectorAll(".scope-row")].map((r) =>
-        `${r.querySelector(".scope-bucket").value}:${r.querySelector(".scope-perm").value}`))];
-      submit.disabled = true;
-      try {
-        const created = await api("POST", "/v1/keys", { body: { name: name.value.trim(), scopes } });
-        showNewKey(created);
-        await loadKeys();
-      } catch (err) {
-        showError(err);
-      } finally {
-        submit.disabled = false;
-      }
-    },
-  },
-  h("label", { class: "field" }, "Name", name),
-  h("div", { class: "field" }, h("span", {}, "Access"), rows,
-    h("button", { type: "button", class: "link with-icon add-scope", onclick: () => addRow("*") }, icon("plus", 16), "Add another bucket")),
-  hint,
-  h("div", { class: "row" }, submit));
+  document.getElementById("create-key-body").replaceChildren(
+    h("label", { class: "field" }, "Name", name),
+    h("div", { class: "field" },
+      h("span", {}, "Access"),
+      rows,
+      h("button", { type: "button", class: "link with-icon add-scope", onclick: () => addRow("*") }, icon("plus", 16), "Add another bucket")),
+    hint);
+
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const scopes = [...new Set([...rows.querySelectorAll(".scope-row")].map((r) =>
+      `${r.querySelector(".scope-bucket").value}:${r.querySelector(".scope-perm").value}`))];
+    submit.disabled = true;
+    try {
+      const created = await api("POST", "/v1/keys", { body: { name: name.value.trim(), scopes } });
+      dialog.close();
+      showNewKey(created);
+      await loadKeys();
+    } catch (err) {
+      showError(err);
+    } finally {
+      submit.disabled = false;
+    }
+  };
+  document.getElementById("create-key-cancel").onclick = () => dialog.close();
+  dialog.showModal();
+  name.focus();
 }
 
 function renderKeyTable() {
-  if (state.apiKeys.length === 0) return h("div", { class: "table-wrap" }, emptyState({ icon: "key", title: "No keys" }));
+  if (state.apiKeys.length === 0) {
+    return h("div", { class: "table-wrap" }, emptyState({
+      icon: "key", title: "No keys",
+      action: h("button", { class: "primary with-icon", onclick: openCreateKey }, icon("plus", 16), "Create key"),
+    }));
+  }
   return h("div", { class: "table-wrap" }, h("table", {},
     h("thead", {}, h("tr", {},
       h("th", { scope: "col" }, "Name"),

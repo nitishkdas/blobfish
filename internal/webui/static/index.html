@@ -154,6 +154,19 @@
       </div>
     </form>
   </dialog>
+  <!-- Filled by openCreateKey() in js/keys.js. Not method="dialog": the
+       form stays open until the server accepts the key. -->
+  <dialog id="create-key">
+    <form id="create-key-form" class="dialog key-dialog">
+      <h2>Create API key</h2>
+      <p class="muted">Give each app its own key, limited to the buckets it needs.</p>
+      <div id="create-key-body" class="key-dialog-body"></div>
+      <div class="row end">
+        <button type="button" id="create-key-cancel">Cancel</button>
+        <button type="submit" id="create-key-submit" class="primary">Create key</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="new-key">
     <form method="dialog" class="dialog">
       <h2>Key created: <span id="new-key-name"></span></h2>

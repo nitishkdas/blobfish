@@ -415,13 +415,14 @@ td.name > button:hover { color: var(--accent-text); }
 .usage-bar.near-full span { background: var(--danger); }
 
 /* ---------- API keys ---------- */
-.key-form { display: grid; gap: 16px; padding: 20px 24px; }
-.key-form input[aria-label="Key name"] { max-width: 360px; }
+.page-head-text { flex: 1; min-width: 0; }
+.page-head-text h1 { display: flex; align-items: center; gap: 10px; }
+.key-dialog-body { display: grid; gap: 16px; }
+.key-dialog-body .field > input { width: 100%; }
 .scope-rows { display: grid; gap: 8px; }
-.scope-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.scope-row select { min-width: 190px; }
+.scope-row { display: flex; gap: 8px; align-items: center; }
+.scope-row select { flex: 1; min-width: 0; }
 .add-scope { justify-self: start; padding-left: 0; font-weight: 500; }
-.key-form .row { padding-top: 4px; }
 
 /* ---------- Dialogs ---------- */
 dialog {
