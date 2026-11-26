@@ -6,24 +6,38 @@ BlobFish is a small, single-node object store written in Go. It is one binary
 and one data folder, with a curl-friendly HTTP + JSON API, built for small
 servers (1 vCPU / 512 MB VPS, Raspberry Pi).
 
-**Status:** early development. The storage engine, `/v1` API and web UI work,
-but BlobFish has not been used with real data yet.
+**Status:** pre-1.0, being run against real apps (dogfooding) before the
+v1.0 release. The storage engine, `/v1` API and web UI are complete. Writes
+are atomic and checksummed; crash tests (a write killed at every step, and
+`kill -9` mid-upload) and simulated power cuts pass. Losing a directory
+entry in a power cut is not tested yet. Until v1.0, keep backups.
 
-## Build and run
-
-Requires Go 1.27+.
+## Install
 
 ```sh
+# Linux amd64/arm64: download a release, check its SHA-256, install the binary
+curl -fsSL https://raw.githubusercontent.com/nitishkdas/blobfish/main/install.sh | sh
+# ...or also set up a hardened systemd service on 127.0.0.1:8080:
+curl -fsSL https://raw.githubusercontent.com/nitishkdas/blobfish/main/install.sh | sh -s -- --systemd
+
+# Docker (data in a volume; put a TLS proxy in front, see docs/deploy.md)
+docker run -d --name blobfish -p 127.0.0.1:8080:8080 -v blobfish:/data ghcr.io/nitishkdas/blobfish:latest
+
+# From source (Go 1.27+)
 CGO_ENABLED=0 go build -o blobfish ./cmd/blobfish
-./blobfish                      # listens on :8080, stores data in ./data
-curl localhost:8080/healthz     # {"status":"ok"}
+./blobfish                      # listens on 127.0.0.1:8080, stores data in ./data
+curl localhost:8080/healthz     # {"status":"ok",...}
 ```
+
+Release archives and the image carry `LICENSE`, `NOTICE` and
+`THIRD_PARTY_NOTICES.md`.
 
 On first start, with no API keys yet, BlobFish creates an admin key and
 saves it to `data/initial-admin-key`, a file only the BlobFish user can read
 (it is also shown if you started BlobFish in a terminal). It is never written
 to the log. Copy it somewhere safe and delete the file. Lost it? Stop the
-server and run `./blobfish -new-admin-key` to mint another.
+server and run `./blobfish -new-admin-key` to mint another. In Docker, read
+it with `docker cp blobfish:/data/initial-admin-key -`.
 
 ## Web UI
 
@@ -31,7 +45,9 @@ Open `http://localhost:8080/` and sign in. You can browse buckets and
 folders page by page, open files in the browser, see details (including
 the SHA-256 checksum), upload files or whole folders (by button or drag and
 drop, with a prompt before overwriting), download, delete, and make share
-links. Buttons you aren't allowed to use are hidden.
+links. Buttons you aren't allowed to use are hidden. The UI is made for
+desktop browsers (narrow windows scroll sideways); the upload-link page
+works on phones too.
 
 ### Users and API keys
 
@@ -50,11 +66,15 @@ admin.
 
 Sessions end after 12 hours without use and after 7 days at most. Changing
 a password signs that user out everywhere else; admins can also sign a
-user out everywhere. Repeated wrong passwords are slowed down: per 15 minutes,
-10 per user name from one network, 100 per user name in all, and 30 per
-network (IPv6 counts per /64). Someone guessing your name from elsewhere
-can't lock you out. Passwords are stored as
-PBKDF2-SHA256 hashes (600,000 rounds).
+user out everywhere. Wrong passwords are limited per 15 minutes: 10 per
+user name from one network, 100 per user name in all, and 30 per network
+(IPv6 counts per /64). Guesses are counted before they are checked, so
+sending many at once doesn't get around the limits. Someone guessing your
+name from one network can't lock you out; a guesser using many networks can
+make new sign-ins wait up to 15 minutes, except from networks you signed in
+from during the last 7 days (remembered until the server restarts). API
+keys are never affected. Passwords are stored as PBKDF2-SHA256 hashes
+(600,000 rounds).
 
 Forgot the password and no admin can sign in? Stop the server and run
 `blobfish -reset-password NAME`: it prints a new random password and ends
@@ -85,7 +105,8 @@ curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","expiresIn":0
 curl -X POST -H "$H" -d '{"bucket":"invoices","key":"2026/inv.pdf","filename":"Invoice 7.pdf"}' localhost:8080/v1/links
 
 # Let someone without a key send you files (a web page at the returned url;
-# they can only add files to that folder, never see or replace anything):
+# they can only add files to that folder, never see or replace anything,
+# and aren't told whether a file name was already taken):
 curl -X POST -H "$H" -d '{"bucket":"invoices","folder":"from-acme","label":"Invoices for ACME","maxFiles":20,"expiresIn":604800}' \
      localhost:8080/v1/uploadlinks
 
@@ -110,6 +131,13 @@ curl -X PATCH -H "$H" -d '{"public":true}' localhost:8080/v1/buckets/site-assets
 Scopes are `<bucket>:<r|w|rw|admin>`, with `*` for every bucket. Creating
 buckets and managing keys needs `*:admin`. Errors always look like
 `{"error":{"code":"NoSuchKey","message":"...","requestId":"..."}}`.
+
+Share links and upload links act for whoever made them: they work only
+while that key or user exists and still has access (read for share links,
+write for upload links), and work again if access comes back.
+
+Every endpoint, parameter and error code is in
+[docs/api.md](docs/api.md).
 
 ## Webhooks
 
@@ -145,8 +173,8 @@ the same machine (`http://127.0.0.1:…`).
 
 Your app's backend keeps the API key and only signs URLs; the user's browser
 sends the file directly to BlobFish, so large uploads never pass through
-your app. First allow your site on the bucket: in the web UI open the bucket,
-click **Browser access** and add `https://app.example.com` (or send
+your app. First allow your site on the bucket: in the web UI open the bucket's
+**Settings** tab, click **Browser access** and add `https://app.example.com` (or send
 `PATCH /v1/buckets/<bucket>` with `{"corsOrigins": ["https://app.example.com"]}`).
 Each bucket has its own list, and changes apply immediately.
 
@@ -170,10 +198,14 @@ servers aren't browsers, so they need no CORS setting at all.
 
 ## Production
 
-BlobFish speaks plain HTTP: run it on `127.0.0.1` behind Caddy, which adds
-HTTPS automatically. [docs/deploy.md](docs/deploy.md) has the complete setup
-(config, a hardened systemd unit, Caddyfile, backups, upgrades), tested end
-to end.
+BlobFish speaks plain HTTP: run it on `127.0.0.1` (the default) behind
+Caddy, which adds HTTPS automatically. Behind a trusted proxy BlobFish sends
+HSTS itself. [docs/deploy.md](docs/deploy.md) has the complete setup
+(config, a hardened systemd unit, Caddyfile, Docker, rotating off-machine
+backups, upgrades and rollback), tested end to end.
+[docs/privacy.md](docs/privacy.md) lists what BlobFish stores and logs, for
+operators who must answer privacy questions. Report security problems as
+described in [SECURITY.md](SECURITY.md).
 
 ## Backups
 
@@ -219,7 +251,7 @@ See `blobfish.example.json`.
 
 | Key | Env var | Default |
 | --- | --- | --- |
-| `listen` | `BLOBFISH_LISTEN` | `:8080` |
+| `listen` (`:8080` = all interfaces; needed in containers) | `BLOBFISH_LISTEN` | `127.0.0.1:8080` |
 | `data_dir` | `BLOBFISH_DATA_DIR` | `data` |
 | `max_object_size` (bytes) | `BLOBFISH_MAX_OBJECT_SIZE` | `5368709120` (5 GiB) |
 | `log_level` | `BLOBFISH_LOG_LEVEL` | `info` |
@@ -230,7 +262,12 @@ See `blobfish.example.json`.
 | `min_free_space` (bytes uploads never use, so deletes always fit; 0 = off) | `BLOBFISH_MIN_FREE_SPACE` | `536870912` (512 MiB) |
 | `trash_days` (deleted files stay restorable this long; 0 = delete at once) | `BLOBFISH_TRASH_DAYS` | `7` |
 | `trusted_proxies` (reverse proxies whose `X-Forwarded-For`/`-Proto` are believed) | `BLOBFISH_TRUSTED_PROXIES` (comma-separated) | none |
+| `operator_name` (shown on upload-link pages: who receives the files) | `BLOBFISH_OPERATOR_NAME` | none |
+| `privacy_url` (your privacy notice, linked from upload-link pages) | `BLOBFISH_PRIVACY_URL` | none |
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE).
+Copyright 2026 The BlobFish Authors. Licensed under the Apache License 2.0;
+see [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party licences are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Contributions: see
+[CONTRIBUTING.md](CONTRIBUTING.md).

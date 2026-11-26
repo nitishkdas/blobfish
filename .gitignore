@@ -13,3 +13,6 @@
 
 # Power-cut test build output
 /test/powercut/build/
+
+# Audit reports (may contain sensitive detail)
+/.prelaunch-audit/

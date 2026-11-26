@@ -1,5 +1,5 @@
 {
-  "listen": ":8080",
+  "listen": "127.0.0.1:8080",
   "data_dir": "data",
   "max_object_size": 5368709120,
   "log_level": "info",
