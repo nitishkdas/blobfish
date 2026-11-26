@@ -28,6 +28,8 @@ MinIO's community edition went into maintenance mode in Dec 2025 and its repo wa
 
 Clustering/replication, versioning, lifecycle rules, object lock/WORM, IAM policies, LDAP/OIDC, vector search, image processing, analytics, S3 API in core.
 
+Also decided (2026-11-26): no virus/malware scanning and no file-signature (magic byte) checks in core. Object stores store bytes; served files are already safe on our origin (`nosniff`, `CSP: sandbox` for script-capable types). Scanning, if ever needed, is an external service driven by webhooks (e.g. clamd), at most a docs recipe. ClamAV is GPLv2: never link it into this Apache-2.0 binary.
+
 ## Architecture
 
 Request flow, top to bottom:
