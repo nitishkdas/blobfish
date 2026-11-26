@@ -5,10 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"mime"
 	"net/http"
 	"net/url"
-	"path"
 	"time"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
@@ -27,15 +25,18 @@ type linkJSON struct {
 	Expires       *time.Time `json:"expires"` // null = never
 	CreatedBy     string     `json:"createdBy"`
 	CreatedByName string     `json:"createdByName"`
+	// Filename is the name the file is served and saved under.
+	Filename string `json:"filename"`
 }
 
 func (a *api) toLinkJSON(r *http.Request, l store.LinkRecord) linkJSON {
+	name := linkFilename(l)
 	out := linkJSON{
 		ID: l.ID, Bucket: l.Bucket, Key: l.Key, Created: l.Created,
-		CreatedBy: l.CreatedBy, CreatedByName: l.CreatedByName,
+		CreatedBy: l.CreatedBy, CreatedByName: l.CreatedByName, Filename: name,
 		// The trailing file name is cosmetic: it makes links readable and
 		// gives downloads a sensible default name.
-		URL: a.baseURL(r) + "/s/" + l.Token + "/" + url.PathEscape(path.Base(l.Key)),
+		URL: a.baseURL(r) + "/s/" + l.Token + "/" + url.PathEscape(name),
 	}
 	if !l.Expires.IsZero() {
 		exp := l.Expires
@@ -56,6 +57,9 @@ func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
 		Bucket    string `json:"bucket"`
 		Key       string `json:"key"`
 		ExpiresIn int64  `json:"expiresIn"` // seconds; 0 = never expires
+		// Filename, if set, replaces the last part of the key as the name
+		// the file is shown and saved under.
+		Filename string `json:"filename"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		a.fail(w, r, err)
@@ -73,6 +77,12 @@ func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	if req.Filename != "" {
+		if err := validateFilename(req.Filename); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+	}
 	lifetime := time.Duration(req.ExpiresIn) * time.Second
 	if req.ExpiresIn < 0 || lifetime > maxLinkLifetime {
 		a.fail(w, r, badRequest("expiresIn must be 0 (never) or up to %d seconds", int64(maxLinkLifetime/time.Second)))
@@ -87,7 +97,7 @@ func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
 	rec := store.LinkRecord{
 		ID: hex.EncodeToString(id[:]), Token: base64.RawURLEncoding.EncodeToString(tok[:]),
 		Bucket: req.Bucket, Key: req.Key, Created: now,
-		CreatedBy: p.KeyID, CreatedByName: p.KeyName,
+		CreatedBy: p.KeyID, CreatedByName: p.KeyName, Filename: req.Filename,
 	}
 	if lifetime > 0 {
 		rec.Expires = now.Add(lifetime).Truncate(time.Second)
@@ -163,15 +173,28 @@ func (a *api) serveLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setActor(r, "link:"+rec.ID)
-	name := path.Base(rec.Key)
+	disposition, err := contentDisposition(r, linkFilename(rec))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
 	a.serveObject(w, r, auth.Target{Bucket: rec.Bucket, Key: rec.Key}, func(h http.Header) {
-		h.Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))
+		h.Set("Content-Disposition", disposition)
 		// Revalidate every time (cheap, via ETag) so a revoked link stops
 		// working at once; never stored by shared caches.
 		h.Set("Cache-Control", "private, no-cache")
 		h.Set("X-Robots-Tag", "noindex")
 		h.Set("Referrer-Policy", "no-referrer")
 	})
+}
+
+// linkFilename is the name a link serves its file under: the one chosen
+// when the link was made, else the last part of the key.
+func linkFilename(l store.LinkRecord) string {
+	if l.Filename != "" {
+		return l.Filename
+	}
+	return defaultFilename(l.Key)
 }
 
 // updateBucket changes bucket settings; today only public visibility.

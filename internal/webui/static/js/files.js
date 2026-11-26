@@ -216,7 +216,9 @@ async function download(o) {
     // A short-lived presigned URL lets the browser stream the file itself,
     // without the API key in the link.
     const { url } = await presign(state.route.bucket, o.key, "GET", 300);
-    const a = h("a", { href: url, download: baseName(o.key), rel: "noreferrer" });
+    // ?download makes the server send Content-Disposition: attachment, so
+    // the browser saves the file even where it ignores the download attribute.
+    const a = h("a", { href: `${url}&download`, download: baseName(o.key), rel: "noreferrer" });
     document.body.append(a);
     a.click();
     a.remove();
@@ -260,6 +262,7 @@ async function share(o) {
           iconButton("copy", "Copy link", () => copyText(l.url, "Link copied", field)),
           mayRevoke && iconButton("trash", "Revoke link", () => revoke(l), "danger")),
         h("span", { class: "share-meta" },
+          l.filename !== baseName(o.key) && `Saved as “${l.filename}” · `,
           expires ? (expired ? `Expired ${relativeTime(expires)}` : `Expires ${relativeTime(expires)}`) : "Never expires",
           ` · created ${relativeTime(new Date(l.created))}`,
           l.createdByName && ` by ${l.createdByName}`));
@@ -286,12 +289,19 @@ async function share(o) {
     await load();
   };
 
+  // The name the file opens and saves under; left as is, the link uses the
+  // file's own name.
+  const nameField = document.getElementById("share-name");
+  nameField.value = baseName(o.key);
   const create = document.getElementById("share-create");
   create.onclick = async () => {
     const ttl = Number(document.getElementById("share-ttl").value);
+    const name = nameField.value.trim();
+    const body = { bucket, key: o.key, expiresIn: ttl };
+    if (name && name !== baseName(o.key)) body.filename = name;
     create.disabled = true;
     try {
-      const l = await api("POST", "/v1/links", { body: { bucket, key: o.key, expiresIn: ttl } });
+      const l = await api("POST", "/v1/links", { body });
       await load();
       await copyText(l.url, ttl === 0 ? "Permanent link created and copied" : "Link created and copied");
     } catch (err) {

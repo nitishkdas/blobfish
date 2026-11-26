@@ -71,6 +71,10 @@ type LinkRecord struct {
 	Created       time.Time `json:"created"`
 	CreatedBy     string    `json:"createdBy"`     // API key ID
 	CreatedByName string    `json:"createdByName"` // its name at the time
+	// Filename is the name the file is served and saved under; empty means
+	// the last part of the key. Older binaries ignore it (they fall back
+	// to the key), so adding it needed no format version bump.
+	Filename string `json:"filename,omitempty"`
 }
 
 // HealthChecker runs a self-check of the data store.

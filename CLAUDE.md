@@ -127,6 +127,18 @@ All endpoints under `/v1`, `Authorization: Bearer <key>`, JSON for everything ex
 | 10 | Release v1.0 | Docs, Docker image, Linux amd64/arm64 binaries |
 | later | v1.1 / v2 | Multipart uploads / optional S3 module with SigV4 |
 
+### Feature roadmap (agreed 2026-11-26, built in this order)
+
+1. **Download names**: optional `filename` per share link; `?download[=name]` on object and link GETs forces a save (`attachment`).
+2. **`blobfish verify`**: re-read every blob against its SHA-256, report bit rot.
+3. **Trash**: a deleted object is kept N days, then purged. Not versioning: no history, overwrites don't go to trash. Share links don't work while an object is in trash.
+4. **Quotas**: per bucket only. Trash does not count toward the quota.
+5. **Upload links**: share links that let someone without a key upload files.
+6. **Webhooks** on object put/delete.
+7. **Small SDKs** (JS, Python, Go), once the API is stable.
+8. **rclone backend** (upstream in rclone; use from a fork first).
+9. **One-line install** script, with the v1.0 release.
+
 ## Commands
 
 Module `github.com/nitishkdas/blobfish`, Go 1.27 (installed locally at `~/.local/go/bin`).

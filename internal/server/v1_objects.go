@@ -95,11 +95,25 @@ func (a *api) getObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
 	if !ok {
 		return
 	}
-	var extra func(http.Header)
-	if public {
-		// Shared caches may keep public files, but must revalidate, so
-		// making the bucket private takes effect at once.
-		extra = func(h http.Header) { h.Set("Cache-Control", "public, no-cache") }
+	// Plain object reads send no Content-Disposition unless ?download asks
+	// the browser to save the file.
+	disposition := ""
+	if r.URL.Query().Has("download") {
+		var err error
+		if disposition, err = contentDisposition(r, defaultFilename(t.Key)); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+	}
+	extra := func(h http.Header) {
+		if public {
+			// Shared caches may keep public files, but must revalidate, so
+			// making the bucket private takes effect at once.
+			h.Set("Cache-Control", "public, no-cache")
+		}
+		if disposition != "" {
+			h.Set("Content-Disposition", disposition)
+		}
 	}
 	a.serveObject(w, r, t, extra)
 }
