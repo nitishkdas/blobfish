@@ -151,24 +151,34 @@ function webhooksSummary(hooks) {
 }
 
 
-// editQuota lets a server admin cap the bucket's size, in GB.
+// editQuota lets a server admin cap the bucket's size, in MB
+// (1 GB = 1024 MB, like the sizes shown everywhere else).
 async function editQuota(bucket) {
-  const GB = 1024 ** 3;
+  const MB = 1024 ** 2;
+  const minMB = Math.ceil((state.me.minQuotaBytes || 10 * MB) / MB);
   const current = bucketInfo(bucket)?.quotaBytes || 0;
   const res = await ask({
     title: `Quota for “${bucket}”`,
     body: [h("p", { class: "muted" },
-      "Uploads that would take the bucket past this size are refused. Files in trash don't count. Leave empty for no limit.")],
+      `Uploads that would go past this size are refused; files in trash don't count. `,
+      `1 GB = 1024 MB. At least ${minMB} MB; leave empty for no limit.`)],
     input: {
-      label: "Maximum size in GB",
-      value: current ? String(+(current / GB).toFixed(3)) : "",
+      label: "Maximum size in MB",
+      value: current ? String(Math.round(current / MB)) : "",
       placeholder: "no limit",
-      validate: (v) => (v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0) ? "" : "Enter a number of GB, or leave empty."),
+      validate: (v) => {
+        if (v === "") return "";
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0) return "Enter a number of MB, or leave empty for no limit.";
+        if (!Number.isInteger(n)) return "Use whole megabytes.";
+        if (n > 0 && n < minMB) return `The smallest quota is ${minMB} MB.`;
+        return "";
+      },
     },
     choices: [{ label: "Cancel", value: "" }, { label: "Save", value: "ok", kind: "primary" }],
   });
   if (!res) return;
-  const quotaBytes = res.value === "" ? 0 : Math.round(Number(res.value) * GB);
+  const quotaBytes = res.value === "" ? 0 : Number(res.value) * MB;
   try {
     await api("PATCH", `/v1/buckets/${encodeURIComponent(bucket)}`, { body: { quotaBytes } });
     state.buckets = (await api("GET", "/v1/buckets")).buckets;

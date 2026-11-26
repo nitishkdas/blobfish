@@ -67,7 +67,7 @@ async function enterApp(key) {
     api("GET", "/v1/buckets", { key }),
   ]);
   session.key = key;
-  state.me = { keyId: me.keyId, name: me.name, scopes: me.scopes, maxObjectSize: me.maxObjectSize, trashDays: me.trashDays || 0 };
+  state.me = { keyId: me.keyId, name: me.name, scopes: me.scopes, maxObjectSize: me.maxObjectSize, trashDays: me.trashDays || 0, minQuotaBytes: me.minQuotaBytes || 0 };
   state.buckets = buckets.buckets;
   route();
 }

@@ -87,7 +87,7 @@ All endpoints under `/v1`, `Authorization: Bearer <key>`, JSON for everything ex
 | --- | --- | --- |
 | PUT | `/v1/buckets/{bucket}` | Create bucket (admin) |
 | DELETE | `/v1/buckets/{bucket}` | Delete bucket (must be empty, trash included) |
-| PATCH | `/v1/buckets/{bucket}` | `{"public": true\|false}` and/or `{"corsOrigins": [...]}` (bucket admin); `{"quotaBytes": n}` (server admin only, 0 = none). Public: object GET/HEAD work without a key; listing/writes still need one. corsOrigins: sites whose web pages may call this bucket from a browser |
+| PATCH | `/v1/buckets/{bucket}` | `{"public": true\|false}` and/or `{"corsOrigins": [...]}` (bucket admin); `{"quotaBytes": n}` (server admin only, 0 = none, else at least 10 MiB: `server.Options.MinQuotaBytes`, set in `cmd/blobfish`; also in `whoami` as `minQuotaBytes`; UI enters MB). Public: object GET/HEAD work without a key; listing/writes still need one. corsOrigins: sites whose web pages may call this bucket from a browser |
 | GET | `/v1/buckets` | List buckets, with `usedBytes`/`objects` (live, trash not counted) and `quotaBytes` |
 | PUT | `/v1/b/{bucket}/{key...}` | Upload object (raw body; Content-Type stored; optional `X-Meta-*`; `If-None-Match: *` = create only, else 412) |
 | GET | `/v1/b/{bucket}/{key...}` | Download (supports `Range`, `If-None-Match`) |

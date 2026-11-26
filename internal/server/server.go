@@ -41,6 +41,9 @@ type Options struct {
 	// PublicURL is the base for presigned URLs; empty means "use the Host
 	// header of the presign request".
 	PublicURL string
+	// MinQuotaBytes is the smallest bucket quota PATCH accepts (0 = no
+	// quota is always allowed). Zero means no minimum (tests).
+	MinQuotaBytes int64
 }
 
 // api holds the /v1 handlers' dependencies.
@@ -61,6 +64,7 @@ type api struct {
 	dataFormat int
 	publicURL  string
 	maxObject  int64
+	minQuota   int64
 }
 
 // New returns the root handler with all routes and middleware applied.
@@ -81,6 +85,7 @@ func New(opts Options) http.Handler {
 		dataFormat: opts.DataFormat,
 		publicURL:  strings.TrimSuffix(opts.PublicURL, "/"),
 		maxObject:  opts.MaxObjectSize,
+		minQuota:   opts.MinQuotaBytes,
 	}
 
 	mux := http.NewServeMux()

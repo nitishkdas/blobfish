@@ -104,6 +104,8 @@ type whoamiResponse struct {
 	MaxObjectSize int64    `json:"maxObjectSize"`
 	// TrashDays: deleted objects stay restorable this long; 0 = trash off.
 	TrashDays int `json:"trashDays"`
+	// MinQuotaBytes is the smallest bucket quota PATCH accepts.
+	MinQuotaBytes int64 `json:"minQuotaBytes"`
 }
 
 // whoami tells a client which key it is using and what that key may do,
@@ -121,7 +123,7 @@ func (a *api) whoami(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, whoamiResponse{
 		KeyID: p.KeyID, Name: p.KeyName, Scopes: scopes, MaxObjectSize: a.maxObject,
-		TrashDays: a.trashDays(),
+		TrashDays: a.trashDays(), MinQuotaBytes: a.minQuota,
 	})
 }
 

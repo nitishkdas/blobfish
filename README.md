@@ -68,8 +68,9 @@ curl -X POST -H "$H" -d '{"bucket":"invoices","folder":"from-acme","label":"Invo
 curl -H "$H" localhost:8080/v1/trash/invoices                      # list, newest first
 curl -X POST -H "$H" localhost:8080/v1/trash/invoices/<id>/restore  # put it back
 
-# Cap a bucket at 5 GiB (server admin key; 0 removes the cap). Uploads that
-# don't fit get 507 QuotaExceeded; files in trash don't count:
+# Cap a bucket at 5 GiB (server admin key; 0 removes the cap, the smallest
+# cap is 10 MiB). Uploads that don't fit get 507 QuotaExceeded; files in
+# trash don't count. The web UI takes the size in MB:
 curl -X PATCH -H "$H" -d '{"quotaBytes":5368709120}' localhost:8080/v1/buckets/invoices
 
 # Serve a whole bucket's files without a key (e.g. website assets):

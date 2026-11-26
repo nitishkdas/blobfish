@@ -29,6 +29,9 @@ var version = "dev"
 const (
 	shutdownTimeout = 15 * time.Second
 	janitorInterval = time.Hour
+	// minQuotaBytes is the smallest bucket quota the API accepts: anything
+	// less is a typo, not a useful limit.
+	minQuotaBytes = 10 << 20
 )
 
 func main() {
@@ -134,6 +137,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			Version:        version,
 			DataFormat:     engine.FormatVersion,
 			PublicURL:      cfg.PublicURL,
+			MinQuotaBytes:  minQuotaBytes,
 		}),
 		// Headers get a fixed limit. Bodies can be multi-GB streams on slow
 		// links, so instead of ReadTimeout/WriteTimeout (which bound the whole

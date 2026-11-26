@@ -226,6 +226,11 @@ func (a *api) updateBucket(w http.ResponseWriter, r *http.Request) {
 	var info store.BucketInfo
 	var err error
 	if req.QuotaBytes != nil {
+		if q := *req.QuotaBytes; q > 0 && q < a.minQuota {
+			a.fail(w, r, fmt.Errorf("%w: the smallest quota is %d MB (%d bytes); use 0 for no quota",
+				store.ErrInvalidQuota, a.minQuota>>20, a.minQuota))
+			return
+		}
 		if info, err = a.buckets.SetBucketQuota(r.Context(), bucket, *req.QuotaBytes); err != nil {
 			a.fail(w, r, err)
 			return

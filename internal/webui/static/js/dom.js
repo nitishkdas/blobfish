@@ -138,6 +138,7 @@ export function ask({ title, body = [], choices, input = null, focus = "" }) {
   const inputEl = document.getElementById("ask-input");
   const error = document.getElementById("ask-error");
   error.textContent = "";
+  inputEl.oninput = () => { error.textContent = ""; }; // a stale error would contradict the new value
   field.hidden = !input;
   if (input) {
     document.getElementById("ask-label").textContent = input.label;
