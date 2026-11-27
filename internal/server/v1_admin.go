@@ -2,8 +2,13 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/nitishkdas/blobfish/internal/auth"
@@ -23,12 +28,62 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		return badRequest("invalid JSON body: %v", err)
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			return err
+		}
+		return badRequest("%s", jsonProblem(err))
 	}
 	if dec.More() {
-		return badRequest("invalid JSON body: unexpected data after object")
+		return badRequest("the request body must hold one JSON object and nothing after it")
 	}
 	return nil
+}
+
+// jsonProblem describes a JSON decoding error in the request's own terms,
+// without Go type names.
+func jsonProblem(err error) string {
+	var typeErr *json.UnmarshalTypeError
+	var syntaxErr *json.SyntaxError
+	switch {
+	case errors.As(err, &typeErr) && typeErr.Field != "":
+		return fmt.Sprintf("the field %q must be %s", typeErr.Field, jsonTypeName(typeErr.Type))
+	case errors.As(err, &typeErr):
+		return "the request body must be a JSON object"
+	case errors.As(err, &syntaxErr), errors.Is(err, io.ErrUnexpectedEOF):
+		return "the request body is not valid JSON"
+	case errors.Is(err, io.EOF):
+		return "the request body is empty; send a JSON object"
+	case strings.HasPrefix(err.Error(), "json: unknown field "):
+		return "unknown field " + strings.TrimPrefix(err.Error(), "json: unknown field ")
+	}
+	return "the request body is not valid JSON"
+}
+
+func jsonTypeName(t reflect.Type) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "a string"
+	case reflect.Bool:
+		return "true or false"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "a whole number"
+	case reflect.Float32, reflect.Float64:
+		return "a number"
+	case reflect.Slice, reflect.Array:
+		plural := map[string]string{"a string": "strings", "a whole number": "whole numbers", "a number": "numbers", "true or false": "true/false values", "an object": "objects"}
+		if p, ok := plural[jsonTypeName(t.Elem())]; ok {
+			return "a list of " + p
+		}
+		return "a list"
+	case reflect.Map, reflect.Struct:
+		return "an object"
+	}
+	return "a different type"
 }
 
 type bucketJSON struct {

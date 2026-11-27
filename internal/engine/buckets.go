@@ -49,7 +49,7 @@ func (e *Engine) DeleteBucket(ctx context.Context, name string) error {
 			return err
 		}
 		if k, _ := objs.Cursor().First(); k != nil {
-			return fmt.Errorf("%w: %s", store.ErrBucketNotEmpty, name)
+			return fmt.Errorf("%w: %s still has objects; delete them first", store.ErrBucketNotEmpty, name)
 		}
 		// Deleting the bucket must not quietly destroy what its trash
 		// still holds; emptying the trash is a separate, explicit step.

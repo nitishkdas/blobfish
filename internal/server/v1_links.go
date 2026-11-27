@@ -93,7 +93,7 @@ func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
 	}
 	lifetime := time.Duration(req.ExpiresIn) * time.Second
 	if req.ExpiresIn < 0 || lifetime > maxLinkLifetime {
-		a.fail(w, r, badRequest("expiresIn must be 0 (never) or up to %d seconds", int64(maxLinkLifetime/time.Second)))
+		a.fail(w, r, badRequest(`"expiresIn" must be 0 (never) or up to %d seconds`, int64(maxLinkLifetime/time.Second)))
 		return
 	}
 

@@ -33,7 +33,7 @@ export function renderKeysPage() {
       h("div", { class: "page-head-text" },
         h("h1", {}, "API keys ", h("span", { class: "count" }, String(state.apiKeys.length))),
         h("p", { class: "muted" },
-          "Give each app its own key, limited to the buckets it needs. A key for one bucket gets “access denied” everywhere else.")),
+          "Create a separate key for each app, with access only to the buckets it needs.")),
       h("button", { class: "primary with-icon", onclick: openCreateKey }, icon("plus", 16), "Create key")),
     renderKeyTable());
 }
@@ -51,7 +51,7 @@ export function scopeEditor(initial = []) {
     const all = [...rows.querySelectorAll(".scope-row")].some((r) =>
       r.querySelector(".scope-bucket").value === "*" && r.querySelector(".scope-perm").value === "admin");
     hint.textContent = all
-      ? "All buckets + Admin is a full server admin: it can create buckets and manage keys and users."
+      ? "Admin of all buckets gives full control of the server, including buckets, API keys and users."
       : "";
   };
   const addRow = (bucket, perm = "rw") => {
@@ -88,11 +88,11 @@ export function scopeEditor(initial = []) {
 
 // openCreateKey asks for a name and access, then shows the new key once.
 function openCreateKey() {
-  const name = h("input", { required: true, maxlength: 64, placeholder: "e.g. billing app (production)", autocomplete: "off" });
+  const name = h("input", { required: true, maxlength: 64, placeholder: "billing app (production)", autocomplete: "off" });
   const access = scopeEditor();
   formDialog({
     title: "Create API key",
-    text: "Give each app its own key, limited to the buckets it needs.",
+    text: "Create a separate key for each app, with access only to the buckets it needs.",
     body: [h("label", { class: "field" }, "Name", name), access.el],
     submitLabel: "Create key",
     focus: name,
@@ -107,7 +107,7 @@ function openCreateKey() {
 function renderKeyTable() {
   if (state.apiKeys.length === 0) {
     return h("div", { class: "table-wrap" }, emptyState({
-      icon: "key", title: "No keys",
+      icon: "key", title: "No API keys",
       action: h("button", { class: "primary with-icon", onclick: openCreateKey }, icon("plus", 16), "Create key"),
     }));
   }
@@ -141,7 +141,7 @@ async function revokeKey(k) {
   if (!ok) return;
   try {
     await api("DELETE", `/v1/keys/${encodeURIComponent(k.id)}`);
-    toast(`Revoked ${k.name}`);
+    toast(`API key “${k.name}” revoked`);
     if (!self) await loadKeys(); // when self, the next request signs us out
     else await api("GET", "/v1/whoami").catch(() => {});
   } catch (err) {

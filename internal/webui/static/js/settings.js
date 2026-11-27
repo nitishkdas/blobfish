@@ -2,7 +2,7 @@
 // allowed to change it (the server checks every request anyway).
 
 import { api, showError } from "./api.js";
-import { ask, confirmDialog, formatInt, formatSize, h, relativeTime, toast } from "./dom.js";
+import { ask, confirmDialog, count, formatSize, h, iconButton, relativeTime, toast } from "./dom.js";
 import { meterBar, renderBucketHeader, visibilityBadge } from "./bucket.js";
 import { navigate } from "./router.js";
 import { bucketInfo, can, isServerAdmin, rerenderMain, state, ui } from "./state.js";
@@ -66,16 +66,16 @@ export function renderSettings() {
       storageRow(b),
       admin && row({
         title: "Visibility",
-        description: "Public buckets let anyone download a file if they have its address. Listing, uploading and deleting always need a key.",
+        description: "In a public bucket, anyone with a file's public link can download it. Listing, uploading and deleting still need access.",
         status: h("div", { class: "value-line" }, visibilityBadge(b),
-          h("span", { class: "muted" }, b.public ? "Anyone with a file's address can open it" : "Every request needs a key or a link")),
+          h("span", { class: "muted" }, b.public ? "Anyone with a public link can download files" : "Only people with access or a share link can open files")),
         actions: [h("button", { onclick: () => setVisibility(bucket, !b.public) }, b.public ? "Make private" : "Make public")],
       }),
       admin && row({
-        title: "Browser access",
-        description: "Websites whose pages may upload to and download from this bucket directly, for example with presigned URLs.",
+        title: "Browser access (CORS)",
+        description: "Websites whose pages may call this bucket directly from the browser, for example to upload with a presigned URL.",
         status: (b.corsOrigins || []).length === 0
-          ? h("span", { class: "muted" }, "No websites")
+          ? h("span", { class: "muted" }, "Not allowed from any website")
           : h("ul", { class: "value-list" }, b.corsOrigins.map((o) => h("li", { class: "mono" }, o === "*" ? "* (any website)" : o))),
         actions: [h("button", { onclick: () => { editBrowserAccess(bucket); whenClosed("cors"); } }, "Edit")],
       }),
@@ -83,7 +83,7 @@ export function renderSettings() {
     group("Integrations", [
       can("w", bucket) && row({
         title: "Upload links",
-        description: "Let people without a key send files into a folder. They can't see, replace or delete anything.",
+        description: "Let people without an account upload files to a folder. They can't see, replace or delete anything.",
         status: S.uploadLinks === null ? loading : uploadLinksSummary(S.uploadLinks),
         actions: [h("button", { onclick: () => { openUploadLinks(bucket, ""); whenClosed("uplinks"); } }, "Manage")],
       }),
@@ -96,7 +96,7 @@ export function renderSettings() {
     ]),
     admin && group("Danger zone", [row({
       title: "Delete bucket",
-      description: "Only an empty bucket can be deleted: delete or move its files, then empty its trash. This can't be undone.",
+      description: "Only an empty bucket can be deleted. Delete its files and empty its trash first. This can't be undone.",
       status: null,
       actions: [h("button", { class: "danger-solid", onclick: () => deleteBucket(bucket) }, "Delete bucket")],
     })], { danger: true }),
@@ -116,7 +116,7 @@ function storageRow(b) {
       h("div", { class: "usage-numbers" },
         h("strong", {}, formatSize(b.usedBytes || 0)),
         h("span", { class: "muted" }, b.quotaBytes ? ` of ${formatSize(b.quotaBytes)}` : " used · no quota"),
-        h("span", { class: "muted" }, ` · ${formatInt(b.objects || 0)} file${b.objects === 1 ? "" : "s"}`)),
+        h("span", { class: "muted" }, ` · ${count(b.objects || 0, "file")}`)),
       b.quotaBytes > 0 && meterBar(pct, `${Math.round(pct)}% of the quota used`)),
     actions: [isServerAdmin() && h("button", { onclick: () => editQuota(b.name) }, b.quotaBytes ? "Change quota" : "Set quota")],
   });
@@ -160,8 +160,8 @@ async function editQuota(bucket) {
   const res = await ask({
     title: `Quota for “${bucket}”`,
     body: [h("p", { class: "muted" },
-      `Uploads that would go past this size are refused; files in trash don't count. `,
-      `1 GB = 1024 MB. At least ${minMB} MB; leave empty for no limit.`)],
+      `Uploads that would exceed this size are refused. Files in trash don't count. `,
+      `Minimum ${minMB} MB (1 GB = 1024 MB). Leave empty for no limit.`)],
     input: {
       label: "Maximum size in MB",
       value: current ? String(Math.round(current / MB)) : "",
@@ -170,7 +170,7 @@ async function editQuota(bucket) {
         if (v === "") return "";
         const n = Number(v);
         if (!Number.isFinite(n) || n < 0) return "Enter a number of MB, or leave empty for no limit.";
-        if (!Number.isInteger(n)) return "Use whole megabytes.";
+        if (!Number.isInteger(n)) return "Enter a whole number of MB.";
         if (n > 0 && n < minMB) return `The smallest quota is ${minMB} MB.`;
         return "";
       },
@@ -194,7 +194,7 @@ function originOf(input) {
   const v = input.trim().toLowerCase();
   if (v === "*") return { origin: "*" };
   let u;
-  try { u = new URL(v); } catch { return { error: "Enter a full address like https://app.example.com." }; }
+  try { u = new URL(v); } catch { return { error: "Enter a full address, for example https://app.example.com." }; }
   if (u.protocol !== "https:" && u.protocol !== "http:") return { error: "Only http:// and https:// sites can be added." };
   if (v.replace(/\/$/, "") !== u.origin || u.username || u.search || u.hash) {
     return { error: `Use just the site, without a path: ${u.origin}` };
@@ -212,13 +212,13 @@ async function editBrowserAccess(bucket) {
   const warn = document.getElementById("cors-warn");
   let origins = [...(bucketInfo(bucket)?.corsOrigins || [])];
 
-  document.getElementById("cors-title").textContent = `Browser access to “${bucket}”`;
+  document.getElementById("cors-title").textContent = `Browser access (CORS) for “${bucket}”`;
   const render = () => {
     list.replaceChildren(...(origins.length
       ? origins.map((o) => h("li", {},
         h("span", { class: "mono" }, o === "*" ? "* (any website)" : o),
         iconButton("close", `Remove ${o}`, () => { origins = origins.filter((x) => x !== o); render(); })))
-      : [h("li", { class: "muted" }, "No websites: pages on other sites can't call this bucket.")]));
+      : [h("li", { class: "muted" }, "No websites added. Pages on other sites can't call this bucket.")]));
     warn.hidden = !origins.includes("*");
   };
   const add = () => {
@@ -238,7 +238,7 @@ async function editBrowserAccess(bucket) {
       await api("PATCH", `/v1/buckets/${encodeURIComponent(bucket)}`, { body: { corsOrigins: origins } });
       state.buckets = (await api("GET", "/v1/buckets")).buckets;
       dialog.close();
-      toast(origins.length ? `Browser access saved for ${bucket}` : `Browser access turned off for ${bucket}`);
+      toast(origins.length ? `Browser access for “${bucket}” saved` : `Browser access for “${bucket}” turned off`);
       ui.renderApp();
     } catch (err) { showError(err); }
   };
@@ -253,13 +253,13 @@ async function setVisibility(bucket, makePublic) {
   const ok = await confirmDialog(makePublic ? {
     title: `Make “${bucket}” public?`,
     body: [
-      "Anyone who has, or guesses, a file's address can download it without a key. Listing, uploading and deleting still need a key.",
+      "Anyone who has or guesses a file's public link can download it without signing in. Listing, uploading and deleting still need access.",
       "Use this for website or app assets, not for private documents.",
     ],
     confirmLabel: "Make public",
   } : {
     title: `Make “${bucket}” private?`,
-    body: ["Public addresses to its files stop working immediately. Share links keep working."],
+    body: ["Public links stop working immediately. Share links keep working."],
     confirmLabel: "Make private",
     danger: false,
   });
@@ -267,7 +267,7 @@ async function setVisibility(bucket, makePublic) {
   try {
     await api("PATCH", `/v1/buckets/${encodeURIComponent(bucket)}`, { body: { public: makePublic } });
     state.buckets = (await api("GET", "/v1/buckets")).buckets;
-    toast(makePublic ? `${bucket} is now public` : `${bucket} is now private`);
+    toast(makePublic ? `Bucket “${bucket}” is now public` : `Bucket “${bucket}” is now private`);
     ui.renderApp();
   } catch (err) { showError(err); }
 }
@@ -275,13 +275,13 @@ async function setVisibility(bucket, makePublic) {
 async function deleteBucket(bucket) {
   const ok = await confirmDialog({
     title: `Delete bucket “${bucket}”?`,
-    body: ["Only an empty bucket can be deleted, with an empty trash. This can't be undone."],
+    body: ["Only an empty bucket with an empty trash can be deleted. This can't be undone."],
     confirmLabel: "Delete bucket",
   });
   if (!ok) return;
   try {
     await api("DELETE", `/v1/buckets/${encodeURIComponent(bucket)}`);
-    toast(`Deleted bucket ${bucket}`);
+    toast(`Bucket “${bucket}” deleted`);
     state.buckets = (await api("GET", "/v1/buckets")).buckets;
     navigate({ view: "home" });
     ui.renderApp();

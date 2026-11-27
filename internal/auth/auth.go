@@ -66,7 +66,7 @@ type Scope struct {
 func ParseScope(s string) (Scope, error) {
 	bucket, p, ok := strings.Cut(s, ":")
 	if !ok {
-		return Scope{}, fmt.Errorf("%w: %q, want bucket:perm", ErrInvalidScope, s)
+		return Scope{}, fmt.Errorf("%w: %q: use bucket:permission, for example invoices:rw", ErrInvalidScope, s)
 	}
 	if bucket != "*" {
 		if err := store.ValidateBucketName(bucket); err != nil {
@@ -84,7 +84,7 @@ func ParseScope(s string) (Scope, error) {
 	case "admin":
 		perm = PermRead | PermWrite | PermAdmin
 	default:
-		return Scope{}, fmt.Errorf("%w: %q, perm must be r, w, rw or admin", ErrInvalidScope, s)
+		return Scope{}, fmt.Errorf("%w: %q: the permission must be r, w, rw or admin", ErrInvalidScope, s)
 	}
 	return Scope{Bucket: bucket, Perm: perm}, nil
 }
@@ -344,7 +344,7 @@ func (s *Service) Presign(method, bucket, key string, ttl time.Duration) (string
 func (s *Service) CreateKey(ctx context.Context, name string, scopes []string) (string, store.KeyRecord, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 64 {
-		return "", store.KeyRecord{}, fmt.Errorf("%w: must be 1-64 characters", ErrInvalidKeyName)
+		return "", store.KeyRecord{}, fmt.Errorf("%w: use 1–64 characters", ErrInvalidKeyName)
 	}
 	if len(scopes) == 0 {
 		return "", store.KeyRecord{}, fmt.Errorf("%w: at least one scope is required", ErrInvalidScope)

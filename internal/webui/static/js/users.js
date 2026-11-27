@@ -3,7 +3,7 @@
 
 import { api, showError } from "./api.js";
 import {
-  confirmDialog, dateFmt, dateFmtLong, emptyState, field, formDialog, h, icon, iconButton, passwordInput, relativeTime, toast,
+  confirmDialog, count, dateFmt, dateFmtLong, emptyState, field, formDialog, h, icon, iconButton, passwordInput, relativeTime, toast,
 } from "./dom.js";
 import { describeScope, scopeEditor } from "./keys.js";
 import { rerenderMain, state } from "./state.js";
@@ -27,11 +27,11 @@ export function suggestName(email, taken) {
 function emailInput(value = "") {
   return h("input", {
     type: "email", maxlength: MAX_EMAIL, autocomplete: "off", spellcheck: "false", autocapitalize: "none",
-    placeholder: "e.g. priya@example.com", value,
+    placeholder: "priya@example.com", value,
   });
 }
 
-const EMAIL_HELP = "Optional. They can sign in with it instead of the user name. No mail is sent to it.";
+const EMAIL_HELP = "Optional. Can be used to sign in instead of the username. BlobFish doesn't send email.";
 
 export async function loadUsers() {
   try {
@@ -47,7 +47,7 @@ export function renderUsersPage() {
       h("div", { class: "page-head-text" },
         h("h1", {}, "Users ", h("span", { class: "count" }, String(state.users.length))),
         h("p", { class: "muted" },
-          "People who sign in to this web UI with a name and password. Apps should use API keys instead.")),
+          "People who sign in to this web interface. Apps should use API keys instead.")),
       h("button", { class: "primary with-icon", onclick: () => openUserDialog(null) }, icon("plus", 16), "Add user")),
     renderTable());
 }
@@ -91,7 +91,7 @@ function openUserDialog(u) {
     const email = emailInput(u.email || "");
     formDialog({
       title: `Edit “${u.name}”`,
-      text: "Changes apply at once, also to their open sessions. The user name can't change.",
+      text: "Changes take effect immediately, including in sessions already signed in. The username can't be changed.",
       body: [field("Email", email, EMAIL_HELP), access.el],
       submitLabel: "Save",
       focus: email,
@@ -99,14 +99,14 @@ function openUserDialog(u) {
         const body = { scopes: access.read() };
         if (email.value.trim().toLowerCase() !== (u.email || "")) body.email = email.value.trim();
         await api("PATCH", `/v1/users/${encodeURIComponent(u.name)}`, { body });
-        toast(`${u.name} updated`);
+        toast(`User “${u.name}” updated`);
         loadUsers();
       },
     });
     return;
   }
   const email = emailInput();
-  const name = h("input", { required: true, maxlength: 64, autocomplete: "off", spellcheck: "false", placeholder: "e.g. priya" });
+  const name = h("input", { required: true, maxlength: 64, autocomplete: "off", spellcheck: "false", placeholder: "priya" });
   // The name follows the email until it is typed in by hand.
   let nameTouched = false;
   name.addEventListener("input", () => { nameTouched = name.value !== ""; });
@@ -116,10 +116,10 @@ function openUserDialog(u) {
   const pw = passwordInput({ required: true, minlength: MIN_PASSWORD, maxlength: 256 });
   formDialog({
     title: "Add user",
-    text: "Share the password with them safely; they can change it after signing in.",
+    text: "Send them the password securely. They can change it after signing in.",
     body: [
       field("Email", email, EMAIL_HELP),
-      field("User name", name, "Filled in from the email; change it if you like. Lowercase letters, digits, dots, dashes or underscores. It can't be changed later."),
+      field("Username", name, "Suggested from the email. Lowercase letters, numbers, dots, dashes or underscores; can't be changed later."),
       field("Password", pw.el, `At least ${MIN_PASSWORD} characters. A few random words work well.`),
       access.el,
     ],
@@ -129,7 +129,7 @@ function openUserDialog(u) {
       const created = await api("POST", "/v1/users", {
         body: { name: name.value.trim(), email: email.value.trim(), password: pw.input.value, scopes: access.read() },
       });
-      toast(`Added ${created.name}`);
+      toast(`User “${created.name}” added`);
       loadUsers();
     },
   });
@@ -139,12 +139,12 @@ function resetPassword(u) {
   const pw = passwordInput({ required: true, minlength: MIN_PASSWORD, maxlength: 256 });
   formDialog({
     title: `New password for “${u.name}”`,
-    text: "They are signed out everywhere and sign in again with this password.",
+    text: "They're signed out everywhere and must sign in with the new password.",
     body: [field("New password", pw.el, `At least ${MIN_PASSWORD} characters.`)],
     submitLabel: "Set password",
     onSubmit: async () => {
       await api("PATCH", `/v1/users/${encodeURIComponent(u.name)}`, { body: { password: pw.input.value } });
-      toast(`Password for ${u.name} changed`);
+      toast(`Password for “${u.name}” changed`);
       loadUsers();
     },
   });
@@ -159,7 +159,7 @@ async function signOutEverywhere(u) {
   if (!ok) return;
   try {
     const { sessionsEnded } = await api("DELETE", `/v1/users/${encodeURIComponent(u.name)}/sessions`);
-    toast(sessionsEnded ? `Ended ${sessionsEnded} session${sessionsEnded === 1 ? "" : "s"}` : `${u.name} wasn't signed in anywhere`);
+    toast(sessionsEnded ? `Ended ${count(sessionsEnded, "session")}` : `${u.name} wasn't signed in anywhere`);
   } catch (err) { showError(err); }
 }
 
@@ -168,7 +168,7 @@ async function deleteUser(u) {
   const ok = await confirmDialog({
     title: `Delete user “${u.name}”?`,
     body: [
-      "They are signed out at once and can't sign in again. Share and upload links they made stop working; files and API keys are not affected.",
+      "They're signed out immediately and can't sign in again. Share and upload links they created stop working. Files and API keys aren't affected.",
       self && h("p", { class: "warn" }, "This is you. You'll be signed out."),
     ],
     confirmLabel: "Delete user",
@@ -176,7 +176,7 @@ async function deleteUser(u) {
   if (!ok) return;
   try {
     await api("DELETE", `/v1/users/${encodeURIComponent(u.name)}`);
-    toast(`Deleted ${u.name}`);
+    toast(`User “${u.name}” deleted`);
     if (!self) loadUsers();
     else await api("GET", "/v1/whoami").catch(() => {}); // 401 signs us out
   } catch (err) {
@@ -192,7 +192,7 @@ export function changeOwnPassword() {
   const again = passwordInput({ required: true, minlength: MIN_PASSWORD, maxlength: 256 });
   formDialog({
     title: "Change your password",
-    text: "You stay signed in here; other browsers signed in as you are signed out.",
+    text: "You stay signed in here. Other browsers signed in as you are signed out.",
     body: [
       field("Current password", current.el),
       field("New password", next.el, `At least ${MIN_PASSWORD} characters.`),
@@ -204,7 +204,7 @@ export function changeOwnPassword() {
       try {
         await api("POST", "/v1/password", { body: { currentPassword: current.input.value, newPassword: next.input.value } });
       } catch (err) {
-        if (err.code === "InvalidCredentials") throw new Error("The current password is wrong.");
+        if (err.code === "InvalidCredentials") throw new Error("The current password is incorrect.");
         throw err;
       }
       toast("Password changed");

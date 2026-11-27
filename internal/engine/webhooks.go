@@ -192,7 +192,7 @@ func (e *Engine) CreateWebhook(ctx context.Context, w store.WebhookRecord) error
 			return err
 		}
 		if n >= MaxWebhooksPerBucket {
-			return fmt.Errorf("%w: %s has %d, the most allowed", store.ErrTooManyWebhooks, w.Bucket, n)
+			return fmt.Errorf("%w: bucket %s already has %d, the maximum", store.ErrTooManyWebhooks, w.Bucket, n)
 		}
 		if tx.Bucket(bktWebhooks).Get([]byte(w.ID)) != nil {
 			return fmt.Errorf("webhook id collision") // random 64-bit IDs: never happens

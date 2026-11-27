@@ -35,7 +35,7 @@ In `<data_dir>` (the files and `meta.db`):
 The first admin key is also written to `<data_dir>/initial-admin-key` until
 you delete that file.
 
-In memory only (lost on restart): failed sign-in counts per user name and
+In memory only (lost on restart): failed sign-in counts per username and
 network (IPv4 address or IPv6 /64) for 15 minutes, and the networks each
 user signed in from during the last 7 days, so an attacker elsewhere can't
 lock them out.

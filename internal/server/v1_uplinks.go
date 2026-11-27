@@ -79,7 +79,7 @@ func normalizeFolder(p string) (string, error) {
 	}
 	p += "/"
 	if strings.Contains(p, "//") {
-		return "", badRequest("folder %q has an empty part", p)
+		return "", badRequest("the folder %q has an empty part", p)
 	}
 	if err := store.ValidateKey(p + "x"); err != nil {
 		return "", err
@@ -89,7 +89,7 @@ func normalizeFolder(p string) (string, error) {
 
 func validateLabel(s string) error {
 	if len(s) > maxUploadLinkLabel || !utf8.ValidString(s) || strings.ContainsFunc(s, unicode.IsControl) {
-		return badRequest("label must be at most %d bytes of text without control characters", maxUploadLinkLabel)
+		return badRequest(`"label" must be at most %d bytes of text without control characters`, maxUploadLinkLabel)
 	}
 	return nil
 }
@@ -134,13 +134,13 @@ func (a *api) createUploadLink(w http.ResponseWriter, r *http.Request) {
 	lifetime := time.Duration(req.ExpiresIn) * time.Second
 	switch {
 	case req.ExpiresIn < 0 || lifetime > maxLinkLifetime:
-		a.fail(w, r, badRequest("expiresIn must be 0 (never) or up to %d seconds", int64(maxLinkLifetime/time.Second)))
+		a.fail(w, r, badRequest(`"expiresIn" must be 0 (never) or up to %d seconds`, int64(maxLinkLifetime/time.Second)))
 		return
 	case req.MaxFiles < 0 || req.MaxFiles > maxUploadLinkFiles:
-		a.fail(w, r, badRequest("maxFiles must be 0 (no limit) to %d", maxUploadLinkFiles))
+		a.fail(w, r, badRequest(`"maxFiles" must be 0 (no limit) to %d`, maxUploadLinkFiles))
 		return
 	case req.MaxFileSize < 0 || req.MaxFileSize > a.maxObject:
-		a.fail(w, r, badRequest("maxFileSize must be 0 (the server's limit) to %d bytes", a.maxObject))
+		a.fail(w, r, badRequest(`"maxFileSize" must be 0 (the server's limit) to %d bytes`, a.maxObject))
 		return
 	}
 

@@ -30,15 +30,15 @@ function renderLogin(message = "", mode = "user") {
   if (mode === "user") {
     const name = h("input", { autocomplete: "username", spellcheck: "false", autocapitalize: "none", required: true });
     const pw = h("input", { type: "password", autocomplete: "current-password", required: true });
-    fields = [h("label", { class: "field" }, "User name or email", name), h("label", { class: "field" }, "Password", pw)];
+    fields = [h("label", { class: "field" }, "Username or email", name), h("label", { class: "field" }, "Password", pw)];
     first = name;
     attempt = async () => {
       let res;
       try {
         res = await api("POST", "/v1/login", { key: "", body: { username: name.value.trim(), password: pw.value } });
       } catch (err) {
-        if (err.code === "InvalidCredentials") throw new Error("Wrong user name, email or password.");
-        if (err.code === "TooManyAttempts") throw new Error("Too many failed attempts. Wait a few minutes and try again.");
+        if (err.code === "InvalidCredentials") throw new Error("The username, email or password is incorrect.");
+        if (err.code === "TooManyAttempts") throw new Error("Too many failed sign-in attempts. Wait a few minutes and try again.");
         throw err;
       }
       await enterApp(res.token);
@@ -55,7 +55,7 @@ function renderLogin(message = "", mode = "user") {
       try {
         await enterApp(k);
       } catch (err) {
-        if (err.status === 401) throw new Error("That key was not accepted.");
+        if (err.status === 401) throw new Error("This API key isn't valid or has been revoked.");
         throw err;
       }
       saveKey(k, remember.checked);
@@ -79,7 +79,7 @@ function renderLogin(message = "", mode = "user") {
 
   const other = mode === "user"
     ? h("button", { type: "button", class: "link login-switch", onclick: () => renderLogin("", "key") }, "Sign in with an API key instead")
-    : h("button", { type: "button", class: "link login-switch", onclick: () => renderLogin("", "user") }, "Sign in with a user name instead");
+    : h("button", { type: "button", class: "link login-switch", onclick: () => renderLogin("", "user") }, "Sign in with a username instead");
 
   root().className = "";
   root().replaceChildren(h("main", { class: "login" },
@@ -88,7 +88,7 @@ function renderLogin(message = "", mode = "user") {
       h("img", { src: "favicon.svg", alt: "" }),
       h("h1", {}, "Sign in to BlobFish"),
       h("p", { class: "muted" }, mode === "user"
-        ? "Use the user name or email and the password your admin gave you."
+        ? "Use the username or email and password your administrator gave you."
         : "Paste an API key. It stays in this browser and is sent only to this server."),
       form,
       other),
@@ -124,8 +124,8 @@ function signOut(message = "") {
 }
 
 session.onUnauthorized = () => signOut(state.me.user
-  ? "Your session ended. Sign in again."
-  : "Your API key was rejected or revoked. Sign in again.");
+  ? "Your session has ended. Sign in again."
+  : "Your API key is no longer valid. Sign in again.");
 
 // ---------- Routing ----------
 
@@ -141,7 +141,7 @@ function route() {
     return;
   }
   if (["files", "trash", "settings"].includes(r.view) && !state.buckets.some((b) => b.name === r.bucket)) {
-    if (r.bucket) toast(`No bucket “${r.bucket}” for this key.`, { error: true });
+    if (r.bucket) toast(`Bucket “${r.bucket}” doesn't exist or you don't have access to it.`, { error: true });
     navigate({ view: "home" }, { replace: true });
     return;
   }
@@ -189,7 +189,7 @@ function renderSidebar() {
   const r = state.route;
   const inBucket = ["files", "trash", "settings"].includes(r.view);
   const items = state.buckets.length === 0
-    ? h("p", { class: "side-empty" }, isServerAdmin() ? "No buckets yet." : "This key has no buckets it can read.")
+    ? h("p", { class: "side-empty" }, isServerAdmin() ? "No buckets yet." : "You don't have access to any buckets.")
     : h("ul", { class: "side-list" }, state.buckets.map((b) =>
       h("li", {}, h("a", {
         href: `#/b/${encodeURIComponent(b.name)}/`,
@@ -198,7 +198,7 @@ function renderSidebar() {
       },
       icon("database", 16),
       h("span", { class: "bucket-name" }, b.name),
-      b.public && h("span", { class: "public-mark", title: "Public: files can be read without a key" }, icon("globe", 13)),
+      b.public && h("span", { class: "public-mark", title: "Public: anyone with a public link can download files" }, icon("globe", 13)),
       h("span", { class: "side-meta" }, formatSize(b.usedBytes || 0))))));
 
   return [
@@ -230,10 +230,10 @@ function renderSidebar() {
 async function newBucket() {
   const res = await ask({
     title: "New bucket",
-    body: [h("p", { class: "muted" }, "Lowercase letters, numbers, dots and dashes; 3 to 63 characters. The name can't be changed later.")],
+    body: [h("p", { class: "muted" }, "3–63 lowercase letters, numbers, dots or dashes. The name can't be changed later.")],
     input: {
       label: "Bucket name",
-      placeholder: "e.g. invoices",
+      placeholder: "invoices",
       validate: (v) => (/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(v) ? "" : "Use 3–63 lowercase letters, numbers, dots or dashes, starting and ending with a letter or number."),
     },
     choices: [{ label: "Cancel", value: "" }, { label: "Create bucket", value: "ok", kind: "primary" }],
@@ -241,7 +241,7 @@ async function newBucket() {
   if (!res) return;
   try {
     await api("PUT", `/v1/buckets/${encodeURIComponent(res.value)}`);
-    toast(`Created bucket ${res.value}`);
+    toast(`Bucket “${res.value}” created`);
     state.buckets = (await api("GET", "/v1/buckets")).buckets;
     navigate({ view: "files", bucket: res.value, prefix: "", page: 1 });
   } catch (err) { showError(err); }
@@ -274,8 +274,8 @@ function renderMain() {
   return h("main", { id: "main", tabindex: "-1", class: "main", "aria-label": "Files" },
     emptyState({
       icon: "database",
-      title: isServerAdmin() ? "No buckets yet" : "Nothing to show",
-      text: isServerAdmin() ? "A bucket holds files, with its own keys, quota and settings." : "This key can't read any bucket.",
+      title: isServerAdmin() ? "No buckets yet" : "No buckets available",
+      text: isServerAdmin() ? "A bucket holds files, with its own keys, quota and settings." : "Ask an administrator for access to a bucket.",
       action: isServerAdmin() && h("button", { class: "primary with-icon", onclick: newBucket }, icon("plus"), "New bucket"),
     }));
 }
@@ -311,7 +311,7 @@ async function start() {
     await enterApp(key);
   } catch (err) {
     forgetKey();
-    renderLogin(err.status === 401 ? "Your saved key no longer works. Sign in again." : err.message);
+    renderLogin(err.status === 401 ? "Your saved sign-in is no longer valid. Sign in again." : err.message);
   }
 }
 

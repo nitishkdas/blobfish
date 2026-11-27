@@ -65,9 +65,9 @@ func checkWebhookURL(raw string, allowPrivate bool) error {
 	u, err := url.Parse(raw)
 	switch {
 	case len(raw) > maxWebhookURL:
-		return badRequest("url is longer than %d bytes", maxWebhookURL)
+		return badRequest(`"url" is longer than %d bytes`, maxWebhookURL)
 	case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "":
-		return badRequest("url must be an http:// or https:// address without user name or password, e.g. https://app.example.com/hooks/blobfish")
+		return badRequest(`"url" must be an http:// or https:// address without a username or password, for example https://app.example.com/hooks/blobfish`)
 	}
 	if allowPrivate {
 		return nil

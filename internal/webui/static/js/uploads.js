@@ -73,7 +73,7 @@ async function startUploads(picked) {
   const bucket = state.route.bucket;
   const prefix = state.route.prefix;
   if (!bucket || !can("w", bucket)) {
-    toast("This key can't upload here.", { error: true });
+    toast("You don't have permission to upload to this bucket.", { error: true });
     return;
   }
   let jobs = picked.map(({ file, path }) => ({ file, key: prefix + path }));
@@ -84,7 +84,7 @@ async function startUploads(picked) {
     const max = state.me.maxObjectSize;
     if (max && file.size > max) {
       job.status = "failed";
-      job.error = `Larger than this server's limit of ${formatSize(max)}`;
+      job.error = `Larger than the ${formatSize(max)} limit on this server`;
     }
     state.uploads.push(job);
   }
@@ -107,7 +107,7 @@ async function resolveConflicts(bucket, jobs) {
     title: clashes.length === 1 ? "This file already exists" : `${clashes.length} files already exist`,
     body: [
       h("ul", { class: "clash-list" }, shown),
-      "Replace overwrites the stored file. Keep both uploads the new one with a number added, like “report (1).pdf”.",
+      "Replace overwrites the existing file. Keep both saves the new file with a number added, for example “report (1).pdf”.",
     ],
     choices: [
       { label: "Cancel", value: "" },
@@ -141,7 +141,7 @@ async function freeName(bucket, key, taken) {
     const candidate = `${dir}${stem} (${n})${ext}`;
     if (!taken.has(candidate) && (await objectExists(bucket, candidate)) === false) return candidate;
   }
-  throw new Error(`No free name found for ${name}`);
+  throw new Error(`No free name is available for ${name}`);
 }
 
 // mapLimit runs fn over items with at most n requests in flight.
@@ -184,7 +184,7 @@ async function pumpUploads() {
       } catch (err) {
         if (job.status === "cancelled") continue;
         job.status = "failed";
-        job.error = err instanceof ApiError ? `${err.message} (${err.code})` : err.message;
+        job.error = err instanceof ApiError ? err.message : err.message;
         announce(`${baseName(job.key)} failed: ${job.error}`);
       }
       renderUploadPanel();
@@ -249,7 +249,7 @@ function putFile(job) {
       try { e = JSON.parse(xhr.responseText).error || {}; } catch { /* not JSON */ }
       reject(new ApiError(xhr.status, e.code || `HTTP${xhr.status}`, e.message || "Upload failed", e.requestId));
     };
-    xhr.onerror = () => { job.xhr = null; reject(new Error("Network error")); };
+    xhr.onerror = () => { job.xhr = null; reject(new Error("Network error. Check your connection.")); };
     xhr.onabort = () => { job.xhr = null; reject(new Error("Cancelled")); };
     xhr.send(job.file);
   });

@@ -25,7 +25,7 @@
     <form method="dialog" class="dialog share-dialog">
       <h2 id="share-title" class="break">Share</h2>
       <section id="share-public" class="share-public" hidden>
-        <p><strong>Public bucket:</strong> anyone with this address can open the file, permanently, until the bucket is made private.</p>
+        <p><strong>Public bucket:</strong> anyone with this link can open the file until the bucket is made private.</p>
         <div class="row">
           <input id="share-public-url" class="mono" readonly aria-label="Public link">
           <button type="button" id="share-public-copy">Copy</button>
@@ -33,7 +33,7 @@
       </section>
       <div>
         <h3 class="section-title">Share links</h3>
-        <p class="muted">Anyone with a link can open the file until it expires or is revoked. No API key needed.</p>
+        <p class="muted">Anyone with a share link can open the file until it expires or is revoked. No account needed.</p>
       </div>
       <ul id="share-links" class="share-links"></ul>
       <div class="row share-new">
@@ -59,18 +59,18 @@
   <dialog id="uplinks" aria-labelledby="uplinks-title">
     <form method="dialog" class="dialog share-dialog">
       <h2 id="uplinks-title" class="break">Upload links</h2>
-      <p class="muted">Anyone with an upload link can add files to its folder from a simple web page, without a key. They can't see, replace or delete anything.</p>
+      <p class="muted">Anyone with an upload link can add files to its folder from a simple web page, without an account. They can't see, replace or delete anything.</p>
       <ul id="uplinks-list" class="share-links"></ul>
       <div>
         <h3 class="section-title">New link</h3>
-        <p class="muted">Names already taken get a number added, like “report (2).pdf”.</p>
+        <p class="muted">If a file name is already taken, a number is added, for example “report (2).pdf”.</p>
       </div>
       <div class="uplink-form">
-        <label class="field">Folder files go into (empty = top of the bucket)
-          <input id="uplinks-folder" autocomplete="off" spellcheck="false" placeholder="e.g. inbox/acme">
+        <label class="field">Folder (leave empty for the top level)
+          <input id="uplinks-folder" autocomplete="off" spellcheck="false" placeholder="inbox/acme">
         </label>
         <label class="field">Title shown to uploaders (optional)
-          <input id="uplinks-label" maxlength="200" autocomplete="off" placeholder="e.g. Receipts for ACME">
+          <input id="uplinks-label" maxlength="200" autocomplete="off" placeholder="Receipts for ACME">
         </label>
         <label class="field">Expires
           <select id="uplinks-ttl">
@@ -145,8 +145,8 @@
   </dialog>
   <dialog id="cors" aria-labelledby="cors-title">
     <form method="dialog" class="dialog">
-      <h2 id="cors-title" class="break">Browser access</h2>
-      <p class="muted">Web pages on these sites may upload to and download from this bucket directly, for example to a presigned upload URL your app creates. Apps, servers and scripts don't need this.</p>
+      <h2 id="cors-title" class="break">Browser access (CORS)</h2>
+      <p class="muted">Allowed origins: web pages on these sites may call this bucket from the browser, for example to upload with a presigned URL your app creates. Apps, servers and scripts don't need this.</p>
       <ul id="cors-list" class="cors-list"></ul>
       <div class="row">
         <input id="cors-input" class="mono" placeholder="https://app.example.com" aria-label="Website address" autocomplete="off" spellcheck="false">

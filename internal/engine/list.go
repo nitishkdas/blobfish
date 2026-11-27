@@ -32,7 +32,7 @@ func (e *Engine) List(ctx context.Context, bucket string, opts store.ListOptions
 	if opts.Cursor != "" {
 		c, err := base64.RawURLEncoding.DecodeString(opts.Cursor)
 		if err != nil || !bytes.HasPrefix(c, prefix) {
-			return store.ListResult{}, fmt.Errorf("%w: does not match this prefix", store.ErrInvalidCursor)
+			return store.ListResult{}, fmt.Errorf("%w: it does not match this prefix", store.ErrInvalidCursor)
 		}
 		start = c
 	}

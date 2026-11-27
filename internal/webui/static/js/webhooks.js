@@ -13,7 +13,7 @@ function health(w) {
   const bad = w.lastFailure ? new Date(w.lastFailure) : null;
   if (bad && (!ok || bad > ok)) {
     const retry = w.retryAfter ? `, retrying ${relativeTime(new Date(w.retryAfter))}` : "";
-    return { failing: true, text: `Failing: ${w.lastError}${retry}${waiting}${lost}` };
+    return { failing: true, text: `Delivery failing. Last error: ${w.lastError}${retry}${waiting}${lost}` };
   }
   if (ok) return { failing: false, text: `Last delivered ${relativeTime(ok)}${waiting}${lost}` };
   return { failing: false, text: `Nothing sent yet${waiting}${lost}` };
@@ -57,7 +57,7 @@ export async function openWebhooks(bucket) {
   const ping = async (w) => {
     try {
       await api("POST", `/v1/webhooks/${encodeURIComponent(w.id)}/test`);
-      toast("Test event queued", { detail: "It is sent within a few seconds." });
+      toast("Test event queued", { detail: "It will be delivered within a few seconds." });
       setTimeout(load, 3000);
     } catch (err) { showError(err); }
   };
@@ -81,7 +81,7 @@ export async function openWebhooks(bucket) {
   create.onclick = async () => {
     const events = [...dialog.querySelectorAll(".webhook-events input:checked")].map((c) => c.value);
     if (!urlEl.value.trim()) { urlEl.focus(); return; }
-    if (events.length === 0) { toast("Pick at least one kind of event.", { error: true }); return; }
+    if (events.length === 0) { toast("Choose at least one event.", { error: true }); return; }
     create.disabled = true;
     try {
       const w = await api("POST", "/v1/webhooks", { body: { bucket, url: urlEl.value.trim(), events } });

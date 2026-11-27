@@ -51,7 +51,7 @@ works on phones too.
 
 ### Users and API keys
 
-**People** sign in with a user name and password; **apps** use API keys.
+**People** sign in with a username (or email) and password; **apps** use API keys.
 Both get the same kind of access: per bucket read, write, read & write or
 admin.
 
@@ -67,7 +67,7 @@ admin.
 Sessions end after 12 hours without use and after 7 days at most. Changing
 a password signs that user out everywhere else; admins can also sign a
 user out everywhere. Wrong passwords are limited per 15 minutes: 10 per
-user name from one network, 100 per user name in all, and 30 per network
+username from one network, 100 per username in all, and 30 per network
 (IPv6 counts per /64). Guesses are counted before they are checked, so
 sending many at once doesn't get around the limits. Someone guessing your
 name from one network can't lock you out; a guesser using many networks can
@@ -174,7 +174,7 @@ the same machine (`http://127.0.0.1:…`).
 Your app's backend keeps the API key and only signs URLs; the user's browser
 sends the file directly to BlobFish, so large uploads never pass through
 your app. First allow your site on the bucket: in the web UI open the bucket's
-**Settings** tab, click **Browser access** and add `https://app.example.com` (or send
+**Settings** tab, click **Browser access (CORS)** and add `https://app.example.com` (or send
 `PATCH /v1/buckets/<bucket>` with `{"corsOrigins": ["https://app.example.com"]}`).
 Each bucket has its own list, and changes apply immediately.
 

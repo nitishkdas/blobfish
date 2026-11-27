@@ -178,12 +178,12 @@ func chain(h http.Handler, mws ...func(http.Handler) http.Handler) http.Handler 
 }
 
 func handleNotFound(w http.ResponseWriter, r *http.Request) {
-	writeError(w, r, http.StatusNotFound, CodeNotFound, "no route for "+r.Method+" "+r.URL.Path)
+	writeError(w, r, http.StatusNotFound, CodeNotFound, "No such endpoint: "+r.Method+" "+r.URL.Path+".")
 }
 
 func methodNotAllowed(w http.ResponseWriter, r *http.Request, allow string) {
 	w.Header().Set("Allow", allow)
-	writeError(w, r, http.StatusMethodNotAllowed, CodeMethodNotAllowed, r.Method+" is not allowed here")
+	writeError(w, r, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "The method "+r.Method+" is not allowed here.")
 }
 
 // fail writes err as an API error, logging server-side failures.

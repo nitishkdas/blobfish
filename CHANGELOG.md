@@ -16,6 +16,9 @@ before upgrading if you might roll back.
   start is no longer reachable from other machines. In containers, or if
   something on another machine connects directly, set `listen` /
   `BLOBFISH_LISTEN` to `:8080`. The official image already does.
+- API error `message`s are now full sentences ("Bucket not found: docs.")
+  and JSON errors name the field instead of Go types. Codes are unchanged;
+  programs should match on `code`, never on `message`.
 - `PUT /u/{token}/{name}` (upload links) now answers `{"size": n}` only. It
   no longer returns the stored name, which told uploaders whether someone
   else's file of that name existed.
@@ -61,6 +64,12 @@ before upgrading if you might roll back.
   HTTP with no trusted proxy configured.
 
 ### Fixed
+
+- Browser access (CORS) dialog failed to open for a bucket that already had
+  an allowed origin.
+- Clearer, consistent wording across the web UI and upload page (see
+  `docs/ui-writing.md`); errors show a written message and the request ID
+  instead of raw codes.
 
 - An upload whose metadata commit failed with an I/O error is now reported
   as `500 CommitUncertain` (it may have been stored), and an upload link

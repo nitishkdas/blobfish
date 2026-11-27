@@ -2,7 +2,7 @@
 // picks or drops files, which go one at a time to PUT /u/<token>/<name>.
 // It can only add files; it never sees what else is stored.
 
-import { announce, formatSize, h, icon, iconButton, relativeTime } from "./dom.js";
+import { announce, count, formatSize, h, icon, iconButton, relativeTime } from "./dom.js";
 import { applyTheme } from "./theme.js";
 
 applyTheme();
@@ -63,10 +63,10 @@ function showClosed(message) {
 
 function renderLimits() {
   const parts = [`Up to ${formatSize(info.maxFileSize)} per file`];
-  if (info.filesLeft !== null) parts.push(`${info.filesLeft} file${info.filesLeft === 1 ? "" : "s"} left`);
+  if (info.filesLeft !== null) parts.push(`${count(info.filesLeft, "file")} left`);
   if (info.expires) parts.push(`link expires ${relativeTime(new Date(info.expires))}`);
   $("limits").textContent = parts.join(" · ");
-  if (info.filesLeft === 0) showClosed("This link has taken all the files it accepts. Thank you!");
+  if (info.filesLeft === 0) showClosed("This link has reached its file limit. Thank you.");
 }
 
 function wire() {
@@ -100,7 +100,7 @@ function add(files) {
     queue.push(job);
   }
   const n = files.length;
-  announce(`${n} file${n === 1 ? "" : "s"} added`);
+  announce(`${count(n, "file")} added`);
   render();
   pump();
 }
@@ -181,13 +181,13 @@ function retry(job) {
 function friendly(status, e) {
   switch (e.code) {
     case "QuotaExceeded":
-    case "InsufficientStorage": return "There's no room for this file. Let the person who sent the link know.";
+    case "InsufficientStorage": return "There isn't enough space for this file. Let the person who sent you the link know.";
     case "EntityTooLarge": return `Larger than the ${formatSize(info.maxFileSize)} limit`;
     case "UploadLimitReached": return "No uploads left on this link";
     case "LinkExpired": return "This link has expired";
     case "NoSuchLink": return "This link no longer works";
-    case "InvalidRequest": return e.message || "This file name can't be used; rename the file and try again.";
-    default: return e.message || `Upload failed (HTTP ${status})`;
+    case "InvalidRequest": return e.message || "This file name isn't allowed. Rename the file and try again.";
+    default: return e.message || "Upload failed. Try again later.";
   }
 }
 

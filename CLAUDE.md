@@ -119,7 +119,7 @@ All endpoints under `/v1`, `Authorization: Bearer <key>`, JSON for everything ex
 - **Presigned URLs**: query params `exp` + `sig`, where `sig = hex(HMAC-SHA256(server_secret, method NUL bucket NUL key NUL exp NUL))`. NUL separators keep it unambiguous (keys may contain anything but NUL). HEAD may use a GET signature. Max expiry 7 days. Server checks signature, then expiry; no key needed. The secret is generated once and stored in `meta.db` `settings`.
 - **Errors**: one shape everywhere, stable codes:
   ```json
-  { "error": { "code": "NoSuchKey", "message": "object not found", "requestId": "01J..." } }
+  { "error": { "code": "NoSuchKey", "message": "Object not found: docs/a.txt.", "requestId": "01J..." } }
   ```
 - **Large files**: single streamed PUT up to a configurable limit (default 5 GB). Resumable multipart = v1.1.
 
@@ -181,7 +181,7 @@ Releases (`.github/workflows/release.yml`, on a `vX.Y.Z` tag): tests, builds `bl
 
 - `cmd/blobfish` – thin `main`; `run()` holds the logic so it is testable (flags, config, listener, graceful shutdown on SIGTERM).
 - `internal/config` – defaults → JSON file (`-config` / `BLOBFISH_CONFIG`, unknown fields rejected) → `BLOBFISH_*` env. `Load` takes `getenv` explicitly. Default `listen` is `127.0.0.1:8080` (decided 2026-11-26: plain HTTP must not face the network by default; containers set `:8080`); `cmd/blobfish` warns at startup when bound to a non-loopback address with no `trusted_proxies` and a non-https `public_url` (`exposedWithoutTLS`). `operator_name`/`privacy_url` are shown on upload-link pages via `/u/{token}/info` `operator`.
-- `internal/server` – router, middleware chain (request ID → access log → recover → body limit), and the `/v1` handlers. `errors.go` holds the stable error codes and the `errorMapping` table: the one place internal errors become API codes. Add new sentinel errors there.
+- `internal/server` – router, middleware chain (request ID → access log → recover → body limit), and the `/v1` handlers. `errors.go` holds the stable error codes and the `errorMapping` table: the one place internal errors become API codes and messages. Add new sentinel errors there with a written lead (`msg`); `classify` appends the error's detail after a colon ("Invalid username: use 2–64 …."), or not when `fixed`. Messages are full sentences (`TestErrorMessagesAreSentences`); JSON decode errors name the field, never Go types (`jsonProblem`). UI wording follows `docs/ui-writing.md`.
   - `/v1/b/...` object routes deliberately bypass `ServeMux` (it would clean/redirect keys like `a//b`); `api.objects` splits bucket/key from the raw decoded path.
   - Every handler calls `a.authorize(...)` before touching the store, so a 403 never reveals whether a bucket/key exists.
   - `hstsMiddleware` (proxy.go) sends `Strict-Transport-Security: max-age=31536000` (no includeSubDomains) only when `clientFrom(r).https` (TLS, or a trusted proxy's X-Forwarded-Proto).

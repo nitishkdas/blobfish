@@ -2,8 +2,7 @@
 
 import { api, bucketPath, loadPref, objectPath, presign, savePref, showError } from "./api.js";
 import {
-  ask, baseName, confirmDialog, emptyState, copyText, dateFmt, dateFmtLong, formatInt, formatSize, h, icon, iconButton,
-  relativeTime, toast,
+  ask, baseName, confirmDialog, copyText, count, dateFmt, dateFmtLong, emptyState, formatInt, formatSize, h, icon, iconButton, relativeTime, toast,
 } from "./dom.js";
 import { navigate } from "./router.js";
 import { PAGE_SIZES, bucketInfo, can, rerenderMain, state } from "./state.js";
@@ -97,7 +96,7 @@ export function renderFiles() {
       h("div", { class: "toolbar-actions" },
         canWrite && h("button", {
           class: "with-icon ghost", onclick: () => openUploadLinks(r.bucket, r.prefix),
-          title: "Let people without a key send files into this folder",
+          title: "Let people without an account upload files to this folder",
         }, icon("inbox", 16), "Upload links"),
         canWrite && h("span", { class: "toolbar-sep", "aria-hidden": "true" }),
         canWrite && h("button", { class: "with-icon", onclick: newFolder }, icon("folderPlus", 16), "New folder"),
@@ -129,12 +128,12 @@ function renderTable(canWrite) {
     return h("div", { class: "table-wrap" }, r.prefix
       ? emptyState({
         icon: "folder", title: "This folder is empty",
-        text: canWrite ? "Folders exist only while they hold files: upload or drop something here and it will stay." : "",
+        text: canWrite ? "Folders exist only while they contain files. Upload a file to keep this folder." : "",
         action: upload,
       })
       : emptyState({
         icon: "upload", title: "No files yet",
-        text: canWrite ? "Upload files or drag them onto this page." : "Files added to this bucket will show up here.",
+        text: canWrite ? "Upload files or drag them onto this page." : "Files added to this bucket appear here.",
         action: upload,
       }));
   }
@@ -184,7 +183,7 @@ function fileIconName(o) {
 
 function renderPager() {
   const L = state.listing;
-  const count = L.folders.length + L.files.length;
+  const shown = L.folders.length + L.files.length;
   const first = (L.page - 1) * L.size + 1;
   const hasPrev = L.page > 1;
   const hasNext = Boolean(L.nextCursor);
@@ -199,12 +198,12 @@ function renderPager() {
 
   return h("nav", { class: "pager", "aria-label": "Pages" },
     h("span", { class: "muted" }, hasPrev || hasNext
-      ? `Items ${formatInt(first)}–${formatInt(first + count - 1)}`
-      : `${formatInt(count)} item${count === 1 ? "" : "s"}`),
+      ? `Items ${formatInt(first)}–${formatInt(first + shown - 1)}`
+      : `${count(shown, "item")}`),
     h("span", { class: "spacer" }),
     h("label", { class: "pager-size muted" }, "Per page", sizeSelect),
     (hasPrev || hasNext) && h("div", { class: "pager-nav" },
-      h("button", { class: "with-icon small", disabled: !hasPrev, onclick: () => go({ page: L.page - 1 }) }, icon("left", 16), "Prev"),
+      h("button", { class: "with-icon small", disabled: !hasPrev, onclick: () => go({ page: L.page - 1 }) }, icon("left", 16), "Previous"),
       h("span", { class: "pager-page", "aria-current": "page" }, `Page ${L.page}`),
       h("button", { class: "with-icon small", disabled: !hasNext, onclick: () => go({ page: L.page + 1 }) }, "Next", icon("right", 16))));
 }
@@ -219,7 +218,7 @@ async function openFile(o) {
   try {
     const { url } = await presign(state.route.bucket, o.key, "GET", 300);
     if (!tab) {
-      toast("Your browser blocked the new tab. Allow pop-ups for this site, or use Download.", { error: true });
+      toast("Your browser blocked the new tab. Allow pop-ups for this site or use Download.", { error: true });
       return;
     }
     tab.opener = null;
@@ -281,9 +280,9 @@ async function share(o) {
           iconButton("copy", "Copy link", () => copyText(l.url, "Link copied", field)),
           mayRevoke && iconButton("trash", "Revoke link", () => revoke(l), "danger")),
         !l.active && h("span", { class: "share-meta warn-text" },
-          `Not working: ${l.createdByName || "its creator"} was removed or can no longer read this file. It works again if their access returns.`),
+          `Inactive: ${l.createdByName || "its creator"} no longer has access to this file. The link works again if their access is restored.`),
         h("span", { class: "share-meta" },
-          l.filename !== baseName(o.key) && `Saved as “${l.filename}” · `,
+          l.filename !== baseName(o.key) && `Downloads as “${l.filename}” · `,
           expires ? (expired ? `Expired ${relativeTime(expires)}` : `Expires ${relativeTime(expires)}`) : "Never expires",
           ` · created ${relativeTime(new Date(l.created))}`,
           l.createdByName && ` by ${l.createdByName}`));
@@ -305,7 +304,7 @@ async function share(o) {
     if (!ok) return;
     try {
       await api("DELETE", `/v1/links/${encodeURIComponent(l.id)}`);
-      toast("Link revoked");
+      toast("Share link revoked");
     } catch (err) { showError(err); }
     await load();
   };
@@ -349,16 +348,16 @@ function showDetails(o) {
   const meta = Object.entries(o.meta || {});
   document.getElementById("details-title").textContent = baseName(o.key);
   document.getElementById("details-body").replaceChildren(h("dl", { class: "details" },
-    row("Key", h("span", { class: "mono break" }, o.key)),
+    row("Path", h("span", { class: "mono break" }, o.key)),
     row("Size", `${formatSize(o.size)} `, h("span", { class: "muted" }, `(${formatInt(o.size)} bytes)`)),
     row("Type", h("span", { class: "mono" }, o.contentType)),
     row("Modified", dateFmtLong.format(new Date(o.modified))),
-    bucketInfo(state.route.bucket)?.public && row("Public URL",
+    bucketInfo(state.route.bucket)?.public && row("Public link",
       h("span", { class: "mono break" }, publicURL(o.key)),
-      iconButton("copy", "Copy public URL", () => copyText(publicURL(o.key), "Public URL copied"), "inline-copy")),
+      iconButton("copy", "Copy public link", () => copyText(publicURL(o.key), "Public link copied"), "inline-copy")),
     row("SHA-256",
       h("span", { class: "mono break" }, o.etag),
-      iconButton("copy", "Copy SHA-256", () => copyText(o.etag, "Checksum copied"), "inline-copy")),
+      iconButton("copy", "Copy SHA-256", () => copyText(o.etag, "SHA-256 checksum copied"), "inline-copy")),
     row("Metadata", meta.length
       ? h("table", { class: "meta-table" }, h("tbody", {}, meta.map(([k, v]) =>
         h("tr", {}, h("th", { scope: "row", class: "mono" }, `X-Meta-${k}`), h("td", { class: "mono break" }, v)))))
@@ -376,14 +375,14 @@ async function deleteObject(o) {
   const ok = await confirmDialog({
     title: days > 0 ? "Move this file to trash?" : "Delete this file?",
     body: [h("p", { class: "mono confirm-target" }, o.key), days > 0
-      ? `You can restore it from the bucket's trash for ${days} day${days === 1 ? "" : "s"}. Its share links stop working until then.`
+      ? `You can restore it from trash for ${count(days, "day")}. Its share links stop working unless it's restored.`
       : "This can't be undone."],
     confirmLabel: days > 0 ? "Move to trash" : "Delete",
   });
   if (!ok) return;
   try {
     await api("DELETE", objectPath(state.route.bucket, o.key));
-    toast(days > 0 ? "Moved to trash" : "Deleted");
+    toast(days > 0 ? "File moved to trash" : "File deleted");
     reload();
   } catch (err) { showError(err); }
 }
@@ -393,15 +392,15 @@ async function deleteObject(o) {
 async function newFolder() {
   const res = await ask({
     title: "New folder",
-    body: [h("p", { class: "muted" }, "Folders in BlobFish are part of file names, so the folder is kept once you upload something into it.")],
+    body: [h("p", { class: "muted" }, "A folder is part of each file's path, so it appears once a file is uploaded into it.")],
     input: {
       label: "Folder name",
-      placeholder: "e.g. invoices or invoices/2026",
+      placeholder: "invoices or invoices/2026",
       validate: (v) => {
         const name = v.replace(/^\/+|\/+$/g, "");
         if (!name) return "Enter a name.";
         const parts = name.split("/");
-        if (parts.some((p) => p === "")) return "Folder names can't contain empty parts like “a//b”.";
+        if (parts.some((p) => p === "")) return "Folder names can't contain empty parts, such as “a//b”.";
         if (parts.some((p) => p === "." || p === "..")) return "“.” and “..” can't be used as folder names.";
         return "";
       },

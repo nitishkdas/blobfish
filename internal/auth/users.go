@@ -29,9 +29,9 @@ import (
 var (
 	// ErrBadCredentials: wrong name or password. Deliberately one error,
 	// so a login can't tell which.
-	ErrBadCredentials  = errors.New("wrong user name, email or password")
+	ErrBadCredentials  = errors.New("wrong username, email or password")
 	ErrTooManyAttempts = errors.New("too many failed sign-ins; wait and try again")
-	ErrInvalidUserName = errors.New("invalid user name")
+	ErrInvalidUserName = errors.New("invalid username")
 	ErrInvalidEmail    = errors.New("invalid email")
 	ErrInvalidPassword = errors.New("invalid password")
 	ErrNotSession      = errors.New("this request is not signed in as a user")
@@ -84,7 +84,7 @@ var userNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,63}$`)
 func NormalizeUserName(name string) (string, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if !userNameRe.MatchString(name) {
-		return "", fmt.Errorf("%w: use 2-64 lowercase letters, digits, dots, dashes or underscores, starting with a letter or digit", ErrInvalidUserName)
+		return "", fmt.Errorf("%w: use 2–64 lowercase letters, numbers, dots, dashes or underscores, starting with a letter or number", ErrInvalidUserName)
 	}
 	return name, nil
 }
@@ -126,7 +126,7 @@ func CheckPassword(name, email, pw string) error {
 	case len(pw) > MaxPasswordLength:
 		return fmt.Errorf("%w: use at most %d bytes", ErrInvalidPassword, MaxPasswordLength)
 	case strings.EqualFold(pw, name):
-		return fmt.Errorf("%w: it can't be the user name", ErrInvalidPassword)
+		return fmt.Errorf("%w: it can't be the username", ErrInvalidPassword)
 	case email != "" && strings.EqualFold(pw, email):
 		return fmt.Errorf("%w: it can't be the email address", ErrInvalidPassword)
 	}

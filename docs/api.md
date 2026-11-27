@@ -30,10 +30,12 @@ is looked up, so a 403 never tells whether a bucket or object exists.
 Every error has the same shape and a stable `code`:
 
 ```json
-{ "error": { "code": "NoSuchKey", "message": "object not found", "requestId": "01J…" } }
+{ "error": { "code": "NoSuchKey", "message": "Object not found: docs/a.txt.", "requestId": "01J…" } }
 ```
 
 `requestId` is also in the `X-Request-Id` header and in the server log.
+`message` is a sentence for people and may be reworded between releases;
+programs should check `code`.
 
 | Status | Code | Meaning |
 | --- | --- | --- |
@@ -43,12 +45,12 @@ Every error has the same shape and a stable `code`:
 | 400 | `InvalidCursor` | A `cursor` not returned by the previous page |
 | 400 | `MetadataTooLarge` | `X-Meta-*` values over 2 KB in total |
 | 400 | `InvalidScope` | Not `bucket:r|w|rw|admin` |
-| 400 | `InvalidUserName` / `InvalidPassword` / `InvalidEmail` | User name, password or email rules |
+| 400 | `InvalidUserName` / `InvalidPassword` / `InvalidEmail` | Username, password or email rules |
 | 400 | `InvalidOrigin` | A `corsOrigins` entry isn't `scheme://host[:port]` |
 | 400 | `IncompleteBody` | The client hung up mid-upload; nothing was stored |
 | 400 | `NotSignedInAsUser` | Needs a user session, not an API key |
 | 401 | `Unauthorized` | No token, or an unknown, revoked or expired one |
-| 401 | `InvalidCredentials` | Wrong user name, email or password (never says which) |
+| 401 | `InvalidCredentials` | Wrong username, email or password (never says which) |
 | 403 | `AccessDenied` | The token lacks the scope |
 | 403 | `SignatureInvalid` / `SignatureExpired` | Presigned URL tampered with or past `exp` |
 | 403 | `CORSNotAllowed` | Browser preflight from an origin the bucket doesn't allow |

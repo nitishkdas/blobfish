@@ -1,7 +1,7 @@
 // The header shared by a bucket's pages: its name, visibility, usage and
 // the Files · Trash · Settings tabs. Tabs a key can't use are not shown.
 
-import { formatInt, formatSize, h, icon } from "./dom.js";
+import { count, formatSize, h, icon } from "./dom.js";
 import { formatHash } from "./router.js";
 import { bucketInfo, can } from "./state.js";
 
@@ -31,15 +31,15 @@ export function renderBucketHeader(bucket, active) {
 export function visibilityBadge(b) {
   if (!b) return null;
   return b.public
-    ? h("span", { class: "badge badge-accent public-chip", title: "Files in this bucket can be read without a key" }, icon("globe", 13), "Public")
-    : h("span", { class: "badge", title: "Every request needs a key or a link" }, icon("lock", 13), "Private");
+    ? h("span", { class: "badge badge-accent public-chip", title: "Anyone with a public link can download files in this bucket" }, icon("globe", 13), "Public")
+    : h("span", { class: "badge", title: "Only people with access or a share link can open files" }, icon("lock", 13), "Private");
 }
 
 // usageText is what the bucket's files take. Trash is not counted,
 // matching the server.
 function usageText(b) {
   if (!b) return "";
-  const files = `${formatInt(b.objects)} file${b.objects === 1 ? "" : "s"}`;
+  const files = `${count(b.objects, "file")}`;
   return `${formatSize(b.usedBytes)} · ${files}${b.quotaBytes ? "" : " · no quota"}`;
 }
 
@@ -49,7 +49,7 @@ function quotaMeter(b) {
   const pct = Math.min(100, (b.usedBytes / b.quotaBytes) * 100);
   return h("div", {
     class: pct >= 90 ? "quota-meter near-full" : "quota-meter",
-    title: "Uploads that don't fit are refused. Trash is not counted.",
+    title: "Uploads that would exceed the quota are refused. Files in trash don't count.",
   },
   h("div", { class: "quota-meter-text" },
     h("span", {}, `${Math.round(pct)}% of quota`),

@@ -29,8 +29,7 @@ func maxBodyMiddleware(limit int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.ContentLength > limit {
-				writeError(w, r, http.StatusRequestEntityTooLarge, CodeEntityTooLarge,
-					fmt.Sprintf("request body exceeds the %d byte limit", limit))
+				writeError(w, r, http.StatusRequestEntityTooLarge, CodeEntityTooLarge, tooLargeMessage(limit))
 				return
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
@@ -58,7 +57,7 @@ func recoverMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 					"panic", fmt.Sprint(v),
 					"stack", string(debug.Stack()))
 				if !rec.wroteHeader {
-					writeError(w, r, http.StatusInternalServerError, CodeInternalError, "internal server error")
+					writeError(w, r, http.StatusInternalServerError, CodeInternalError, internalErrorMessage)
 				}
 			}()
 			next.ServeHTTP(rec, r)

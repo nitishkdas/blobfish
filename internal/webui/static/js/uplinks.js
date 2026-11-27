@@ -2,7 +2,7 @@
 // form for a new one into the folder on screen.
 
 import { api, showError } from "./api.js";
-import { confirmDialog, copyText, formatSize, h, iconButton, relativeTime, toast } from "./dom.js";
+import { confirmDialog, copyText, count, formatSize, h, iconButton, relativeTime, toast } from "./dom.js";
 import { can, state } from "./state.js";
 
 const MB = 1024 * 1024;
@@ -29,7 +29,7 @@ export async function openUploadLinks(bucket, folder) {
       const meta = [
         l.label && `“${l.label}”`,
         `into ${l.prefix ? l.prefix : "the top level"}`,
-        l.maxFiles ? `${l.uploads} of ${l.maxFiles} files` : `${l.uploads} file${l.uploads === 1 ? "" : "s"} so far`,
+        l.maxFiles ? `${l.uploads} of ${l.maxFiles} files` : `${count(l.uploads, "file")} so far`,
         l.maxFileSize && `max ${formatSize(l.maxFileSize)} each`,
         expires ? (expired ? `expired ${relativeTime(expires)}` : `expires ${relativeTime(expires)}`) : "never expires",
       ].filter(Boolean).join(" · ");
@@ -39,7 +39,7 @@ export async function openUploadLinks(bucket, folder) {
           iconButton("copy", "Copy link", () => copyText(l.url, "Link copied", field)),
           mayRevoke && iconButton("trash", "Revoke link", () => revoke(l), "danger")),
         !l.active && h("span", { class: "share-meta warn-text" },
-          `Not working: ${l.createdByName || "its creator"} was removed or can no longer write to this bucket. It works again if their access returns.`),
+          `Inactive: ${l.createdByName || "its creator"} no longer has write access to this bucket. The link works again if their access is restored.`),
         h("span", { class: "share-meta" }, meta));
     }));
   };
@@ -52,7 +52,7 @@ export async function openUploadLinks(bucket, folder) {
   const revoke = async (l) => {
     const ok = await confirmDialog({
       title: "Revoke this upload link?",
-      body: [h("p", { class: "mono confirm-target" }, l.url), "Nobody can upload with it any more. Files already sent stay."],
+      body: [h("p", { class: "mono confirm-target" }, l.url), "No one can upload with it anymore. Files already received are kept."],
       confirmLabel: "Revoke link",
     });
     if (!ok) return;
@@ -76,7 +76,7 @@ export async function openUploadLinks(bucket, folder) {
       maxFileSize: Math.max(0, Math.round((Number(sizeEl.value) || 0) * MB)),
     };
     if (state.me.maxObjectSize && body.maxFileSize > state.me.maxObjectSize) {
-      toast(`Max size per file can be at most ${formatSize(state.me.maxObjectSize)}, the server's limit.`, { error: true });
+      toast(`The maximum file size can't exceed the server limit of ${formatSize(state.me.maxObjectSize)}.`, { error: true });
       return;
     }
     create.disabled = true;

@@ -113,6 +113,9 @@ export function formatSize(n) {
   return `${i === 0 ? n : sizeFmt.format(n)} ${units[i]}`;
 }
 export function formatInt(n) { return intFmt.format(n); }
+
+// count(3, "file") = "3 files"; count(1, "file") = "1 file".
+export function count(n, word) { return `${formatInt(n)} ${word}${n === 1 ? "" : "s"}`; }
 export const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 export const dateFmtLong = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "medium" });
 

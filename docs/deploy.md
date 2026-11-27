@@ -121,7 +121,7 @@ journalctl -u blobfish -f                      # logs (never contain the key)
 
 Browser uploads straight from your app's web pages (presigned URLs) are
 allowed per bucket: in the web UI open the bucket's **Settings** tab and use
-**Browser access**.
+**Browser access (CORS)**.
 
 ## 4. Put Caddy in front
 

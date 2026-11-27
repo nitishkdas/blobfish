@@ -8,11 +8,30 @@ const KEY_STORE = "blobfish.key";
 // rejects it (revoked, or the data dir was reset).
 export const session = { key: null, onUnauthorized: () => {} };
 
+// Messages for codes where the UI can say more than the API's own message
+// (which is written for any client). Everything else shows the server's
+// message, which is a full sentence.
+const MESSAGES = {
+  AccessDenied: "You don't have permission to do this.",
+  Unauthorized: "Your session has ended. Sign in again.",
+  NoSuchBucket: "This bucket doesn't exist or was deleted.",
+  NoSuchKey: "This file doesn't exist or was deleted.",
+  QuotaExceeded: "This bucket is full: the upload would exceed its quota.",
+  EntityTooLarge: "The file is larger than this server allows.",
+  CommitUncertain: "The upload may or may not have been saved. Reload the list to check before trying again.",
+  IncompleteBody: "The upload was interrupted. Nothing was saved.",
+  RequestTimeout: "The upload stalled and was stopped. Try again.",
+  InternalError: "Something went wrong on the server. Try again, or give your administrator the request ID.",
+  DataCorrupt: "This file failed its integrity check. Ask your administrator to run blobfish verify.",
+  NetworkError: "Can't reach the server. Check your connection and try again.",
+};
+
 export class ApiError extends Error {
   constructor(status, code, message, requestId) {
-    super(message);
+    super(MESSAGES[code] || message);
     this.status = status;
     this.code = code;
+    this.serverMessage = message;
     this.requestId = requestId;
   }
 }
@@ -27,7 +46,12 @@ export async function api(method, path, { body, key = session.key } = {}) {
   const headers = {};
   if (key) headers.Authorization = `Bearer ${key}`; // none for /v1/login
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  let res;
+  try {
+    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch {
+    throw new ApiError(0, "NetworkError", "Network error");
+  }
   if (!res.ok) {
     const err = await parseError(res);
     // Only a rejected key/session signs out: a wrong password (when
@@ -70,7 +94,7 @@ export function presign(bucket, key, method, expiresIn) {
 
 export function showError(err) {
   if (err instanceof ApiError) {
-    toast(err.message, { error: true, detail: `${err.code}${err.requestId ? " · " + err.requestId : ""}` });
+    toast(err.message, { error: true, detail: err.requestId ? `Request ID ${err.requestId}` : "" });
   } else {
     toast(String(err.message || err), { error: true });
   }

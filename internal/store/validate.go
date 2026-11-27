@@ -13,7 +13,7 @@ import (
 // Staying S3-compatible here keeps the optional S3 module simple later.
 func ValidateBucketName(name string) error {
 	if len(name) < 3 || len(name) > 63 {
-		return fmt.Errorf("%w: %q must be 3-63 characters", ErrInvalidBucketName, name)
+		return fmt.Errorf("%w: %q must be 3–63 characters", ErrInvalidBucketName, name)
 	}
 	for i := 0; i < len(name); i++ {
 		c := name[i]
@@ -37,13 +37,13 @@ func ValidateBucketName(name string) error {
 func ValidateKey(key string) error {
 	switch {
 	case key == "":
-		return fmt.Errorf("%w: empty", ErrInvalidKey)
+		return fmt.Errorf("%w: it is empty", ErrInvalidKey)
 	case len(key) > MaxKeyLen:
-		return fmt.Errorf("%w: longer than %d bytes", ErrInvalidKey, MaxKeyLen)
+		return fmt.Errorf("%w: it is longer than %d bytes", ErrInvalidKey, MaxKeyLen)
 	case !utf8.ValidString(key):
-		return fmt.Errorf("%w: not valid UTF-8", ErrInvalidKey)
+		return fmt.Errorf("%w: it is not valid UTF-8", ErrInvalidKey)
 	case strings.IndexByte(key, 0) >= 0:
-		return fmt.Errorf("%w: contains NUL", ErrInvalidKey)
+		return fmt.Errorf("%w: it contains a NUL character", ErrInvalidKey)
 	}
 	return nil
 }
@@ -55,7 +55,7 @@ func ValidateMeta(m Meta) error {
 		n += len(k) + len(v)
 	}
 	if n > MaxUserMetaBytes {
-		return fmt.Errorf("%w: %d bytes, limit %d", ErrMetadataTooLarge, n, MaxUserMetaBytes)
+		return fmt.Errorf("%w: %d bytes, the limit is %d", ErrMetadataTooLarge, n, MaxUserMetaBytes)
 	}
 	return nil
 }

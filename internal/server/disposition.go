@@ -17,19 +17,19 @@ const maxFilenameLen = 255
 func validateFilename(name string) error {
 	switch {
 	case name == "":
-		return badRequest("filename is empty")
+		return badRequest("the filename is empty")
 	case len(name) > maxFilenameLen:
-		return badRequest("filename is longer than %d bytes", maxFilenameLen)
+		return badRequest("the filename is longer than %d bytes", maxFilenameLen)
 	case !utf8.ValidString(name):
-		return badRequest("filename is not valid UTF-8")
+		return badRequest("the filename is not valid UTF-8")
 	case name == "." || name == "..":
-		return badRequest("filename %q is not a file name", name)
+		return badRequest("the filename %q is not a file name", name)
 	case strings.TrimSpace(name) != name:
-		return badRequest("filename must not start or end with spaces")
+		return badRequest("the filename must not start or end with spaces")
 	case strings.ContainsAny(name, `/\`):
-		return badRequest("filename must not contain / or \\")
+		return badRequest("the filename must not contain / or \\")
 	case strings.ContainsFunc(name, unicode.IsControl):
-		return badRequest("filename must not contain control characters")
+		return badRequest("the filename must not contain control characters")
 	}
 	return nil
 }

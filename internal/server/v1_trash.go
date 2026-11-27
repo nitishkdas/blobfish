@@ -43,7 +43,7 @@ func (a *api) listTrash(w http.ResponseWriter, r *http.Request) {
 	if s := q.Get("limit"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 1 {
-			a.fail(w, r, badRequest("limit must be a positive integer"))
+			a.fail(w, r, badRequest(`"limit" must be a positive integer`))
 			return
 		}
 		opts.Limit = n

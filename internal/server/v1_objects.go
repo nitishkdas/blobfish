@@ -92,7 +92,7 @@ func (a *api) putObject(w http.ResponseWriter, r *http.Request, t auth.Target) {
 		// keep the connection alive.
 		w.Header().Set("Connection", "close")
 		if meta.NoOverwrite && errors.Is(err, store.ErrKeyExists) {
-			writeError(w, r, http.StatusPreconditionFailed, CodePreconditionFailed, err.Error())
+			writeError(w, r, http.StatusPreconditionFailed, CodePreconditionFailed, "An object with this key already exists, and If-None-Match: * forbids replacing it.")
 			return
 		}
 		a.fail(w, r, err)
@@ -261,7 +261,7 @@ func (a *api) listObjects(w http.ResponseWriter, r *http.Request, bucket string)
 	if s := q.Get("limit"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 1 {
-			a.fail(w, r, badRequest("limit must be a positive integer"))
+			a.fail(w, r, badRequest(`"limit" must be a positive integer`))
 			return
 		}
 		opts.Limit = n

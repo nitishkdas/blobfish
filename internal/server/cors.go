@@ -37,7 +37,7 @@ func (a *api) cors(w http.ResponseWriter, r *http.Request, bucket string) (handl
 	if !anyOrigin && !slices.Contains(allowed, origin) {
 		if preflight || r.Method == http.MethodOptions {
 			writeError(w, r, http.StatusForbidden, CodeCORSNotAllowed,
-				"this bucket does not allow browser access from "+origin)
+				"This bucket does not allow browser access (CORS) from "+origin+".")
 			return true
 		}
 		return false // no CORS headers: the browser hides the response
