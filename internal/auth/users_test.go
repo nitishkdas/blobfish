@@ -76,11 +76,11 @@ func TestUserRules(t *testing.T) {
 		pw string
 		ok bool
 	}{{"short", false}, {"ten chars!", true}, {"alice12345", true}, {"ALICEALICE", true}, {strings.Repeat("x", 257), false}} {
-		if err := CheckPassword("aliceali", tt.pw); (err == nil) != tt.ok {
+		if err := CheckPassword("aliceali", "", tt.pw); (err == nil) != tt.ok {
 			t.Errorf("CheckPassword(%q) err = %v, want ok=%v", tt.pw, err, tt.ok)
 		}
 	}
-	if err := CheckPassword("longusername", "LongUserName"); !errors.Is(err, ErrInvalidPassword) {
+	if err := CheckPassword("longusername", "", "LongUserName"); !errors.Is(err, ErrInvalidPassword) {
 		t.Errorf("password equal to the name accepted: %v", err)
 	}
 }
@@ -88,10 +88,10 @@ func TestUserRules(t *testing.T) {
 func TestLoginAndSessions(t *testing.T) {
 	ctx := context.Background()
 	s, clock := newUserService(t)
-	if _, err := s.CreateUser(ctx, "Alice", "a long password", []string{"invoices:rw"}); err != nil {
+	if _, err := s.CreateUser(ctx, "Alice", "", "a long password", []string{"invoices:rw"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateUser(ctx, "alice", "another password", []string{"*:r"}); !errors.Is(err, store.ErrUserExists) {
+	if _, err := s.CreateUser(ctx, "alice", "", "another password", []string{"*:r"}); !errors.Is(err, store.ErrUserExists) {
 		t.Fatalf("duplicate (case-insensitive) user: err = %v", err)
 	}
 
@@ -186,7 +186,7 @@ func TestLoginAndSessions(t *testing.T) {
 func TestPasswordChangeEndsOtherSessions(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newUserService(t)
-	s.CreateUser(ctx, "bob", "first password", []string{"*:r"})
+	s.CreateUser(ctx, "bob", "", "first password", []string{"*:r"})
 	here, _, _, _ := s.Login(ctx, "bob", "first password", "1.1.1.1")
 	there, _, _, _ := s.Login(ctx, "bob", "first password", "2.2.2.2")
 	p, _ := authAs(t, s, here)
@@ -228,7 +228,7 @@ func TestPasswordChangeEndsOtherSessions(t *testing.T) {
 func TestLoginThrottle(t *testing.T) {
 	ctx := context.Background()
 	s, clock := newUserService(t)
-	s.CreateUser(ctx, "carol", "carols password", []string{"*:r"})
+	s.CreateUser(ctx, "carol", "", "carols password", []string{"*:r"})
 	login := func(pw, ip string) error {
 		_, _, _, err := s.Login(ctx, "carol", pw, ip)
 		return err
@@ -313,7 +313,7 @@ func TestThrottleTableStaysSmall(t *testing.T) {
 func TestThrottleHoldsUnderParallelGuesses(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newUserService(t)
-	if _, err := s.CreateUser(ctx, "dave", "daves password", []string{"*:r"}); err != nil {
+	if _, err := s.CreateUser(ctx, "dave", "", "daves password", []string{"*:r"}); err != nil {
 		t.Fatal(err)
 	}
 	for range cap(s.hashing) {
@@ -365,7 +365,7 @@ func TestThrottleHoldsUnderParallelGuesses(t *testing.T) {
 func TestThrottleFloodKeepsUserCounts(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newUserService(t)
-	if _, err := s.CreateUser(ctx, "erin", "erins password", []string{"*:r"}); err != nil {
+	if _, err := s.CreateUser(ctx, "erin", "", "erins password", []string{"*:r"}); err != nil {
 		t.Fatal(err)
 	}
 	for i := range maxFailsPerUser {
@@ -389,7 +389,7 @@ func TestThrottleFloodKeepsUserCounts(t *testing.T) {
 func TestThrottleTrustsKnownNetwork(t *testing.T) {
 	ctx := context.Background()
 	s, clock := newUserService(t)
-	if _, err := s.CreateUser(ctx, "fay", "fays password", []string{"*:r"}); err != nil {
+	if _, err := s.CreateUser(ctx, "fay", "", "fays password", []string{"*:r"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := s.Login(ctx, "fay", "fays password", "203.0.113.9"); err != nil {
@@ -431,7 +431,7 @@ func (r *resetDuringLogin) GetUser(ctx context.Context, name string) (store.User
 func TestLoginRacingPasswordReset(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newUserService(t)
-	if _, err := s.CreateUser(ctx, "gil", "old password!", []string{"*:r"}); err != nil {
+	if _, err := s.CreateUser(ctx, "gil", "", "old password!", []string{"*:r"}); err != nil {
 		t.Fatal(err)
 	}
 	base := s.users
@@ -489,7 +489,7 @@ func (failingTouch) TouchSession(context.Context, string, time.Time) error {
 func TestSessionWorksWhenLastSeenCantBeWritten(t *testing.T) {
 	ctx := context.Background()
 	s, clock := newUserService(t)
-	s.CreateUser(ctx, "fay", "fays password", []string{"*:rw"})
+	s.CreateUser(ctx, "fay", "", "fays password", []string{"*:rw"})
 	tok, _, _, _ := s.Login(ctx, "fay", "fays password", "1.1.1.1")
 	s.users = failingTouch{s.users}
 	*clock = clock.Add(touchEvery + time.Minute) // due for a LastSeen write
@@ -503,12 +503,12 @@ func TestSessionWorksWhenLastSeenCantBeWritten(t *testing.T) {
 func TestRecreatedUserIsADifferentPrincipal(t *testing.T) {
 	ctx := context.Background()
 	s, clock := newUserService(t)
-	s.CreateUser(ctx, "gus", "first gus password", []string{"*:r"})
+	s.CreateUser(ctx, "gus", "", "first gus password", []string{"*:r"})
 	tok, _, _, _ := s.Login(ctx, "gus", "first gus password", "1.1.1.1")
 	first, _ := authAs(t, s, tok)
 	s.DeleteUser(ctx, "gus")
 	*clock = clock.Add(time.Second)
-	s.CreateUser(ctx, "gus", "second gus password", []string{"*:r"})
+	s.CreateUser(ctx, "gus", "", "second gus password", []string{"*:r"})
 	tok, _, _, _ = s.Login(ctx, "gus", "second gus password", "1.1.1.1")
 	second, _ := authAs(t, s, tok)
 	if !strings.HasPrefix(first.KeyID, "user:gus@") || first.KeyID == second.KeyID {
@@ -519,7 +519,7 @@ func TestRecreatedUserIsADifferentPrincipal(t *testing.T) {
 func TestPurgeExpiredSessions(t *testing.T) {
 	ctx := context.Background()
 	s, clock := newUserService(t)
-	s.CreateUser(ctx, "dave", "daves password", []string{"*:r"})
+	s.CreateUser(ctx, "dave", "", "daves password", []string{"*:r"})
 	old, _, _, _ := s.Login(ctx, "dave", "daves password", "1.1.1.1")
 	*clock = clock.Add(SessionIdle + time.Hour)
 	fresh, _, _, _ := s.Login(ctx, "dave", "daves password", "1.1.1.1")
@@ -538,7 +538,7 @@ func TestPurgeExpiredSessions(t *testing.T) {
 func TestConcurrentLogins(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newUserService(t)
-	s.CreateUser(ctx, "erin", "erins password", []string{"*:r"})
+	s.CreateUser(ctx, "erin", "", "erins password", []string{"*:r"})
 	var wg sync.WaitGroup
 	for i := range 8 {
 		wg.Go(func() {
@@ -588,7 +588,7 @@ func TestSessionWriteFailureIsLogged(t *testing.T) {
 	s, clock := newUserService(t)
 	var buf syncBuffer
 	s.WithLogger(slog.New(slog.NewTextHandler(&buf, nil)))
-	if _, err := s.CreateUser(ctx, "hal", "hals password", []string{"*:r"}); err != nil {
+	if _, err := s.CreateUser(ctx, "hal", "", "hals password", []string{"*:r"}); err != nil {
 		t.Fatal(err)
 	}
 	tok, _, _, err := s.Login(ctx, "hal", "hals password", "1.2.3.4")

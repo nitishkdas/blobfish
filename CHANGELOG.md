@@ -6,7 +6,9 @@ for what that means for rolling back).
 
 ## [Unreleased]
 
-Data format: unchanged (5).
+Data format: **6** (was 5; adds user emails). The first start upgrades the
+data dir; after that, an older binary refuses to open it, so take a backup
+before upgrading if you might roll back.
 
 ### Upgrade notes
 
@@ -26,6 +28,10 @@ Data format: unchanged (5).
 
 - User accounts: people sign in with a name and password; apps keep API
   keys. Admins manage users in the UI or at `/v1/users`.
+- Optional email per user: they can sign in with it instead of their user
+  name. It can be changed (the user name can't), is unique across users and
+  is never logged. No mail is sent yet. When adding a user in the UI, the
+  user name is filled in from the email.
 - Redesigned web UI with light and dark themes, an API keys page, and
   bucket quotas entered in MB (10 MB minimum).
 - `operator_name` and `privacy_url` settings, shown on upload-link pages.

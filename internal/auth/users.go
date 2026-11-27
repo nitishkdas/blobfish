@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/mail"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,9 +29,10 @@ import (
 var (
 	// ErrBadCredentials: wrong name or password. Deliberately one error,
 	// so a login can't tell which.
-	ErrBadCredentials  = errors.New("wrong user name or password")
+	ErrBadCredentials  = errors.New("wrong user name, email or password")
 	ErrTooManyAttempts = errors.New("too many failed sign-ins; wait and try again")
 	ErrInvalidUserName = errors.New("invalid user name")
+	ErrInvalidEmail    = errors.New("invalid email")
 	ErrInvalidPassword = errors.New("invalid password")
 	ErrNotSession      = errors.New("this request is not signed in as a user")
 )
@@ -87,9 +89,36 @@ func NormalizeUserName(name string) (string, error) {
 	return name, nil
 }
 
+// MaxEmailLength is the longest address SMTP allows (RFC 5321 path limit).
+const MaxEmailLength = 254
+
+// NormalizeEmail lowercases and checks an email address: one plain
+// address (no display name, no comments or quoting), with a dotted domain.
+// The whole address is lowercased: mail servers that treat the local part
+// as case-sensitive are vanishingly rare, and two accounts differing only
+// in case would be a trap. Nothing checks that the address receives mail.
+func NormalizeEmail(email string) (string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	bad := fmt.Errorf("%w: use an address like name@example.com", ErrInvalidEmail)
+	if len(email) > MaxEmailLength {
+		return "", fmt.Errorf("%w: at most %d characters", ErrInvalidEmail, MaxEmailLength)
+	}
+	addr, err := mail.ParseAddress(email)
+	if err != nil || addr.Name != "" || addr.Address != email || strings.ContainsAny(email, "\"\\ ") {
+		return "", bad
+	}
+	local, domain, _ := strings.Cut(email, "@")
+	if local == "" || len(local) > 64 || !strings.Contains(domain, ".") ||
+		strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") || strings.Contains(domain, "..") {
+		return "", bad
+	}
+	return email, nil
+}
+
 // CheckPassword applies the password rules: length only (NIST 800-63B);
-// composition rules make passwords worse, not better.
-func CheckPassword(name, pw string) error {
+// composition rules make passwords worse, not better. The password also
+// can't be the user's name or email (pass "" for none).
+func CheckPassword(name, email, pw string) error {
 	n := utf8.RuneCountInString(pw)
 	switch {
 	case n < MinPasswordLength:
@@ -98,6 +127,8 @@ func CheckPassword(name, pw string) error {
 		return fmt.Errorf("%w: use at most %d bytes", ErrInvalidPassword, MaxPasswordLength)
 	case strings.EqualFold(pw, name):
 		return fmt.Errorf("%w: it can't be the user name", ErrInvalidPassword)
+	case email != "" && strings.EqualFold(pw, email):
+		return fmt.Errorf("%w: it can't be the email address", ErrInvalidPassword)
 	}
 	return nil
 }
@@ -173,28 +204,57 @@ func (s *Service) UseUsers(u store.Users) *Service {
 	return s
 }
 
-// Login checks a name and password and starts a session. clientIP is used
-// only for throttling. The token is returned once and never stored.
-func (s *Service) Login(ctx context.Context, name, pw, clientIP string) (string, store.SessionRecord, store.UserRecord, error) {
+// LookupLogin finds the user a sign-in names: login is a user name, or an
+// email if it contains "@" (names can't). id is what the attempt is
+// counted under: the user's name when the user exists, so both ways in
+// share one set of limits, else the normalized input. ok is false when no
+// user could ever match login (the format is impossible).
+func (s *Service) LookupLogin(ctx context.Context, login string) (user store.UserRecord, id string, exists, ok bool, err error) {
+	if strings.Contains(login, "@") {
+		email, nerr := NormalizeEmail(login)
+		if nerr != nil {
+			return store.UserRecord{}, "", false, false, nil
+		}
+		user, err = s.users.UserByEmail(ctx, email)
+		id = email
+	} else {
+		name, nerr := NormalizeUserName(login)
+		if nerr != nil {
+			return store.UserRecord{}, "", false, false, nil
+		}
+		user, err = s.users.GetUser(ctx, name)
+		id = name
+	}
+	if errors.Is(err, store.ErrNoSuchUser) {
+		return store.UserRecord{}, id, false, true, nil
+	}
+	if err != nil {
+		return store.UserRecord{}, "", false, true, err
+	}
+	return user, user.Name, true, true, nil
+}
+
+// Login checks a user name or email and a password and starts a session.
+// clientIP is used only for throttling. The token is returned once and
+// never stored.
+func (s *Service) Login(ctx context.Context, login, pw, clientIP string) (string, store.SessionRecord, store.UserRecord, error) {
 	if s.users == nil {
 		return "", store.SessionRecord{}, store.UserRecord{}, ErrBadCredentials
 	}
 	now := s.now()
 	net := clientNet(clientIP)
 	netLimit := limit{key: "net:" + net, max: maxFailsPerNet}
-	name, err := NormalizeUserName(name)
+	user, name, exists, possible, err := s.LookupLogin(ctx, login)
 	if err != nil {
+		return "", store.SessionRecord{}, store.UserRecord{}, err
+	}
+	if !possible {
 		// No user can have this name, so don't count it per name: junk
 		// names (up to the body limit) would otherwise fill the table.
 		if wait := s.throttle.begin(now, netLimit); wait > 0 {
 			return "", store.SessionRecord{}, store.UserRecord{}, TooManyAttemptsError{Wait: wait}
 		}
 		return "", store.SessionRecord{}, store.UserRecord{}, ErrBadCredentials
-	}
-	user, err := s.users.GetUser(ctx, name)
-	exists := err == nil
-	if err != nil && !errors.Is(err, store.ErrNoSuchUser) {
-		return "", store.SessionRecord{}, store.UserRecord{}, err
 	}
 	// The same limits apply whether or not the name exists (so the throttle
 	// can't be used to find out); only where the counts are kept differs.
@@ -312,6 +372,9 @@ func (s *Service) Logout(ctx context.Context, p Principal) error {
 	return s.users.DeleteSession(ctx, p.sessionHash)
 }
 
+// CheckScopes checks a user's scope list: at least one, each valid.
+func CheckScopes(scopes []string) error { return checkScopes(scopes) }
+
 func checkScopes(scopes []string) error {
 	if len(scopes) == 0 {
 		return fmt.Errorf("%w: at least one scope is required", ErrInvalidScope)
@@ -324,13 +387,19 @@ func checkScopes(scopes []string) error {
 	return nil
 }
 
-// CreateUser adds a user with a password and scopes.
-func (s *Service) CreateUser(ctx context.Context, name, pw string, scopes []string) (store.UserRecord, error) {
+// CreateUser adds a user with a password and scopes. email is optional
+// ("" for none).
+func (s *Service) CreateUser(ctx context.Context, name, email, pw string, scopes []string) (store.UserRecord, error) {
 	name, err := NormalizeUserName(name)
 	if err != nil {
 		return store.UserRecord{}, err
 	}
-	if err := CheckPassword(name, pw); err != nil {
+	if email != "" {
+		if email, err = NormalizeEmail(email); err != nil {
+			return store.UserRecord{}, err
+		}
+	}
+	if err := CheckPassword(name, email, pw); err != nil {
 		return store.UserRecord{}, err
 	}
 	if err := checkScopes(scopes); err != nil {
@@ -341,7 +410,7 @@ func (s *Service) CreateUser(ctx context.Context, name, pw string, scopes []stri
 		return store.UserRecord{}, err
 	}
 	now := s.now().UTC()
-	rec := store.UserRecord{Name: name, Scopes: scopes, PasswordHash: hash, Created: now, PasswordChanged: now}
+	rec := store.UserRecord{Name: name, Email: email, Scopes: scopes, PasswordHash: hash, Created: now, PasswordChanged: now}
 	if err := s.users.CreateUser(ctx, rec); err != nil {
 		return store.UserRecord{}, err
 	}
@@ -361,7 +430,11 @@ func (s *Service) ListUsers(ctx context.Context) ([]store.UserRecord, error) {
 // SetPassword sets a user's password and signs them out everywhere except
 // keepSession (the caller's own session when changing their own password).
 func (s *Service) SetPassword(ctx context.Context, name, pw string, keep Principal) error {
-	if err := CheckPassword(name, pw); err != nil {
+	user, err := s.users.GetUser(ctx, name)
+	if err != nil {
+		return err
+	}
+	if err := CheckPassword(name, user.Email, pw); err != nil {
 		return err
 	}
 	hash, err := s.hash(pw)
@@ -421,6 +494,21 @@ func (s *Service) SetUserScopes(ctx context.Context, name string, scopes []strin
 	}
 	return s.users.UpdateUser(ctx, name, func(u *store.UserRecord) error {
 		u.Scopes = scopes
+		return nil
+	}, false, "")
+}
+
+// SetUserEmail sets a user's email; "" removes it. ErrEmailTaken if
+// another user has it.
+func (s *Service) SetUserEmail(ctx context.Context, name, email string) (store.UserRecord, error) {
+	if email != "" {
+		var err error
+		if email, err = NormalizeEmail(email); err != nil {
+			return store.UserRecord{}, err
+		}
+	}
+	return s.users.UpdateUser(ctx, name, func(u *store.UserRecord) error {
+		u.Email = email
 		return nil
 	}, false, "")
 }

@@ -174,7 +174,7 @@ func Open(dir string, opts Options) (*Engine, error) {
 	}
 	var formatBefore int
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx, bktTrash, bktUplinks, bktWebhooks, bktOutbox, bktUsers, bktSessions} {
+		for _, name := range [][]byte{bktBuckets, bktObjects, bktBlobs, bktKeys, bktSettings, bktLinks, bktLinkIdx, bktTrash, bktUplinks, bktWebhooks, bktOutbox, bktUsers, bktSessions, bktUserEmail} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}

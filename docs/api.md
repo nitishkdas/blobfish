@@ -43,12 +43,12 @@ Every error has the same shape and a stable `code`:
 | 400 | `InvalidCursor` | A `cursor` not returned by the previous page |
 | 400 | `MetadataTooLarge` | `X-Meta-*` values over 2 KB in total |
 | 400 | `InvalidScope` | Not `bucket:r|w|rw|admin` |
-| 400 | `InvalidUserName` / `InvalidPassword` | User name or password rules |
+| 400 | `InvalidUserName` / `InvalidPassword` / `InvalidEmail` | User name, password or email rules |
 | 400 | `InvalidOrigin` | A `corsOrigins` entry isn't `scheme://host[:port]` |
 | 400 | `IncompleteBody` | The client hung up mid-upload; nothing was stored |
 | 400 | `NotSignedInAsUser` | Needs a user session, not an API key |
 | 401 | `Unauthorized` | No token, or an unknown, revoked or expired one |
-| 401 | `InvalidCredentials` | Wrong user name or password (never says which) |
+| 401 | `InvalidCredentials` | Wrong user name, email or password (never says which) |
 | 403 | `AccessDenied` | The token lacks the scope |
 | 403 | `SignatureInvalid` / `SignatureExpired` | Presigned URL tampered with or past `exp` |
 | 403 | `CORSNotAllowed` | Browser preflight from an origin the bucket doesn't allow |
@@ -59,6 +59,7 @@ Every error has the same shape and a stable `code`:
 | 405 | `MethodNotAllowed` | |
 | 408 | `RequestTimeout` | The upload made no progress for `transfer_idle_timeout` |
 | 409 | `BucketAlreadyExists` / `UserAlreadyExists` | Name taken |
+| 409 | `EmailTaken` | Another user has this email |
 | 409 | `BucketNotEmpty` | Delete objects and empty the trash first |
 | 409 | `KeyExists` | Restore target is taken by another object |
 | 409 | `LastAdminKey` | Would delete the last `*:admin` API key |
@@ -215,17 +216,22 @@ may only call public internet addresses.
 
 | Request | Scope | |
 | --- | --- | --- |
-| `POST /v1/login` | none | `{"username","password"}` → `{"token","expires","idleTimeoutSeconds","user"}`. 401 `InvalidCredentials`; 429 `TooManyAttempts` with `Retry-After` |
+| `POST /v1/login` | none | `{"username","password"}`, where `username` may also be the user's email → `{"token","expires","idleTimeoutSeconds","user"}`. 401 `InvalidCredentials`; 429 `TooManyAttempts` with `Retry-After` |
 | `POST /v1/logout` | session | Ends this session, 204 |
 | `POST /v1/password` | session | `{"currentPassword","newPassword"}`; ends the user's other sessions |
-| `GET /v1/users` | `*:admin` | `{"users":[{"name","scopes","created","passwordChanged","lastLogin"}]}` |
-| `POST /v1/users` | `*:admin` | `{"name","password","scopes"}` → 201 user |
-| `PATCH /v1/users/{name}` | `*:admin` | `{"password"}` (ends their sessions) and/or `{"scopes"}` (applies at once) |
+| `GET /v1/users` | `*:admin` | `{"users":[{"name","email","scopes","created","passwordChanged","lastLogin"}]}` (`email` only when set) |
+| `POST /v1/users` | `*:admin` | `{"name","email","password","scopes"}` (`email` optional) → 201 user |
+| `PATCH /v1/users/{name}` | `*:admin` | Any of `{"password"}` (ends their sessions), `{"scopes"}` (applies at once), `{"email"}` (`""` removes it). All are checked first: a refused request changes nothing |
 | `DELETE /v1/users/{name}` | `*:admin` | Deletes the user and their sessions; their links stop working |
 | `DELETE /v1/users/{name}/sessions` | `*:admin` | Signs them out everywhere |
 
 Names: 2–64 of `a-z 0-9 . _ -`, starting alphanumeric (input is
-lowercased). Passwords: 10–256 characters, not the name. Sessions end after
+lowercased); a name is the user's fixed identity and never changes. Emails
+are optional, one plain address of at most 254 characters with a dotted
+domain, stored lowercased and unique across users; they can be changed.
+Nothing is ever sent to them (no verification yet). Signing in by email or
+by name counts against the same limits. Passwords: 10–256 characters, not
+the name or the email. Sessions end after
 12 hours unused or 7 days at most. Wrong passwords are limited per 15
 minutes: 10 per name and network, 100 per name, 30 per network (IPv6 per
 /64); networks the user signed in from in the last 7 days are exempt from

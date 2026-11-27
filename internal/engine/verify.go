@@ -195,6 +195,15 @@ func Verify(ctx context.Context, dir string, opts VerifyOptions) (VerifyStats, e
 	}
 
 	if opts.Bucket == "" {
+		err = db.View(func(tx *bbolt.Tx) error {
+			for _, d := range checkUserEmails(tx) {
+				report(VerifyProblem{Kind: ProblemMetadata, Detail: d})
+			}
+			return nil
+		})
+		if err != nil {
+			return st, err
+		}
 		st.OrphanBlobs, err = countOrphanBlobs(ctx, db, e.objDir)
 		if err != nil {
 			return st, err

@@ -11,7 +11,7 @@ import (
 // FormatVersion is the on-disk format this binary reads and writes. Bump it
 // whenever meta.db or the objects/ layout changes in a way older binaries
 // would misread, and add the upgrade step to migrationSteps.
-const FormatVersion = 5
+const FormatVersion = 6
 
 // ErrFormatTooNew means the data dir was written by a newer BlobFish.
 // Opening it with this binary could misread or damage it.
@@ -54,6 +54,11 @@ func migrationSteps() map[int]migration {
 			}
 			return nil
 		},
+		// 6: user emails and the email -> name index. A format-5 binary
+		// would delete a user, or change their record, without updating
+		// the index, leaving a stale entry that blocks the address and
+		// signs in as whoever later takes the name.
+		5: indexUserEmails,
 	}
 }
 

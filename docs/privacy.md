@@ -26,7 +26,7 @@ In `<data_dir>` (the files and `meta.db`):
 | Data | Kept until |
 | --- | --- |
 | Uploaded files, their names (keys), content type, size, checksum, time and `X-Meta-*` metadata | Deleted, then `trash_days` (default 7) in the bucket's trash, unless emptied sooner |
-| Users: name, scopes, PBKDF2 password hash, created / password-changed / last-sign-in times | The user is deleted |
+| Users: name, email (optional; BlobFish sends nothing to it), scopes, PBKDF2 password hash, created / password-changed / last-sign-in times | The user is deleted, or the email is removed |
 | Sessions: a hash of the token, user, start, last use (updated at most every 5 minutes) and expiry. No IP address or browser details | 12 hours unused or 7 days, then purged within an hour; at once on sign-out, password change or user deletion |
 | API keys: name, scopes, hash of the token | Revoked |
 | Share and upload links: token, file or folder, expiry, label, and the creator's key ID and name | Revoked, or the file or bucket is deleted. A link whose creator is deleted stops working but its record stays until revoked |
@@ -48,7 +48,8 @@ method, path, status, size, duration, the client's IP address, and who made
 the request: an API key's name and ID, `user:<name>`, `link:<id>`,
 `uplink:<id>`, `presigned`, `public`, or `login:<name>` for a sign-in
 attempt (only when that user exists; otherwise `login:(unknown name)`, so
-a password typed into the name field is never logged).
+a password typed into the name field is never logged). Email addresses are
+never logged: a sign-in by email is logged under the user's name.
 
 Paths contain bucket names and object keys, which may be personal (for
 example `invoices/jane-doe.pdf`). Link tokens are replaced by `<token>`,

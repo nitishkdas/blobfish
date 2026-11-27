@@ -9,6 +9,29 @@ import { describeScope, scopeEditor } from "./keys.js";
 import { rerenderMain, state } from "./state.js";
 
 const MIN_PASSWORD = 10;
+const MAX_EMAIL = 254;
+
+// suggestName turns an email into a free user name: the part before the @
+// (and before any +tag), cut down to the characters names allow, with -2,
+// -3, … added if someone has it already. "" if nothing usable is left.
+export function suggestName(email, taken) {
+  let base = email.trim().toLowerCase().split("@")[0].split("+")[0]
+    .replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").replace(/-+$/, "").slice(0, 60);
+  if (base.length < 2) return "";
+  if (!taken.has(base)) return base;
+  for (let i = 2; ; i++) {
+    if (!taken.has(`${base}-${i}`)) return `${base}-${i}`;
+  }
+}
+
+function emailInput(value = "") {
+  return h("input", {
+    type: "email", maxlength: MAX_EMAIL, autocomplete: "off", spellcheck: "false", autocapitalize: "none",
+    placeholder: "e.g. priya@example.com", value,
+  });
+}
+
+const EMAIL_HELP = "Optional. They can sign in with it instead of the user name. No mail is sent to it.";
 
 export async function loadUsers() {
   try {
@@ -40,56 +63,71 @@ function renderTable() {
   return h("div", { class: "table-wrap" }, h("table", {},
     h("thead", {}, h("tr", {},
       h("th", { scope: "col" }, "Name"),
+      h("th", { scope: "col" }, "Email"),
       h("th", { scope: "col" }, "Access"),
       h("th", { scope: "col", class: "when" }, "Last sign-in"),
       h("th", { scope: "col", class: "when" }, "Created"),
       h("th", { scope: "col", class: "actions" }, h("span", { class: "visually-hidden" }, "Actions")))),
     h("tbody", {}, state.users.map((u) => h("tr", {},
       h("td", { class: "name" }, u.name, u.name === state.me.user && h("span", { class: "chip you" }, "you")),
+      h("td", {}, u.email || h("span", { class: "muted" }, "None")),
       h("td", {}, h("div", { class: "chips" }, u.scopes.map((sc) =>
         h("span", { class: sc.startsWith("*:admin") ? "chip strong" : "chip" }, describeScope(sc))))),
       h("td", { class: "when", title: u.lastLogin ? dateFmtLong.format(new Date(u.lastLogin)) : "" },
         u.lastLogin ? relativeTime(new Date(u.lastLogin)) : h("span", { class: "muted" }, "Never")),
       h("td", { class: "when" }, dateFmt.format(new Date(u.created))),
       h("td", { class: "actions" },
-        iconButton("sliders", `Edit access for ${u.name}`, () => openUserDialog(u)),
+        iconButton("sliders", `Edit email and access for ${u.name}`, () => openUserDialog(u)),
         iconButton("lock", `Reset password for ${u.name}`, () => resetPassword(u)),
         iconButton("signOut", `Sign ${u.name} out everywhere`, () => signOutEverywhere(u)),
         iconButton("trash", `Delete ${u.name}`, () => deleteUser(u), "danger")))))));
 }
 
-// openUserDialog adds a user (u null) or edits an existing user's access.
+// openUserDialog adds a user (u null) or edits an existing user's email
+// and access.
 function openUserDialog(u) {
   const access = scopeEditor(u ? u.scopes : []);
   if (u) {
+    const email = emailInput(u.email || "");
     formDialog({
-      title: `Access for “${u.name}”`,
-      text: "Changes apply at once, also to their open sessions.",
-      body: [access.el],
+      title: `Edit “${u.name}”`,
+      text: "Changes apply at once, also to their open sessions. The user name can't change.",
+      body: [field("Email", email, EMAIL_HELP), access.el],
       submitLabel: "Save",
+      focus: email,
       onSubmit: async () => {
-        await api("PATCH", `/v1/users/${encodeURIComponent(u.name)}`, { body: { scopes: access.read() } });
-        toast(`Access for ${u.name} updated`);
+        const body = { scopes: access.read() };
+        if (email.value.trim().toLowerCase() !== (u.email || "")) body.email = email.value.trim();
+        await api("PATCH", `/v1/users/${encodeURIComponent(u.name)}`, { body });
+        toast(`${u.name} updated`);
         loadUsers();
       },
     });
     return;
   }
+  const email = emailInput();
   const name = h("input", { required: true, maxlength: 64, autocomplete: "off", spellcheck: "false", placeholder: "e.g. priya" });
+  // The name follows the email until it is typed in by hand.
+  let nameTouched = false;
+  name.addEventListener("input", () => { nameTouched = name.value !== ""; });
+  email.addEventListener("input", () => {
+    if (!nameTouched) name.value = suggestName(email.value, new Set(state.users.map((x) => x.name)));
+  });
   const pw = passwordInput({ required: true, minlength: MIN_PASSWORD, maxlength: 256 });
   formDialog({
     title: "Add user",
     text: "Share the password with them safely; they can change it after signing in.",
     body: [
-      field("User name", name, "Lowercase letters, digits, dots, dashes or underscores."),
+      field("Email", email, EMAIL_HELP),
+      field("User name", name, "Filled in from the email; change it if you like. Lowercase letters, digits, dots, dashes or underscores. It can't be changed later."),
       field("Password", pw.el, `At least ${MIN_PASSWORD} characters. A few random words work well.`),
       access.el,
     ],
     submitLabel: "Add user",
-    focus: name,
+    focus: email,
     onSubmit: async () => {
       const created = await api("POST", "/v1/users", {
-        body: { name: name.value.trim(), password: pw.input.value, scopes: access.read() },
+        body: { name: name.value.trim(), email: email.value.trim(), password: pw.input.value, scopes: access.read() },
       });
       toast(`Added ${created.name}`);
       loadUsers();

@@ -19,7 +19,7 @@ function root() { return document.getElementById("app"); }
 
 // ---------- Sign in ----------
 
-// renderLogin shows the sign-in card: user name + password, or (for admins
+// renderLogin shows the sign-in card: user name or email + password, or (for admins
 // before any user exists, and for scripts' keys) an API key.
 function renderLogin(message = "", mode = "user") {
   const remember = h("input", { type: "checkbox" });
@@ -30,14 +30,14 @@ function renderLogin(message = "", mode = "user") {
   if (mode === "user") {
     const name = h("input", { autocomplete: "username", spellcheck: "false", autocapitalize: "none", required: true });
     const pw = h("input", { type: "password", autocomplete: "current-password", required: true });
-    fields = [h("label", { class: "field" }, "User name", name), h("label", { class: "field" }, "Password", pw)];
+    fields = [h("label", { class: "field" }, "User name or email", name), h("label", { class: "field" }, "Password", pw)];
     first = name;
     attempt = async () => {
       let res;
       try {
         res = await api("POST", "/v1/login", { key: "", body: { username: name.value.trim(), password: pw.value } });
       } catch (err) {
-        if (err.code === "InvalidCredentials") throw new Error("Wrong user name or password.");
+        if (err.code === "InvalidCredentials") throw new Error("Wrong user name, email or password.");
         if (err.code === "TooManyAttempts") throw new Error("Too many failed attempts. Wait a few minutes and try again.");
         throw err;
       }
@@ -88,7 +88,7 @@ function renderLogin(message = "", mode = "user") {
       h("img", { src: "favicon.svg", alt: "" }),
       h("h1", {}, "Sign in to BlobFish"),
       h("p", { class: "muted" }, mode === "user"
-        ? "Use the user name and password your admin gave you."
+        ? "Use the user name or email and the password your admin gave you."
         : "Paste an API key. It stays in this browser and is sent only to this server."),
       form,
       other),

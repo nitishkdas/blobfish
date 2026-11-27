@@ -17,6 +17,9 @@ import (
 var (
 	bktUsers    = []byte("users")    // name -> store.UserRecord
 	bktSessions = []byte("sessions") // token hash -> store.SessionRecord
+	// bktUserEmail indexes users by email: normalized email -> name. Kept
+	// in the same transaction as every change to a user's Email.
+	bktUserEmail = []byte("useremail")
 )
 
 var _ store.Users = (*Engine)(nil)
@@ -48,8 +51,49 @@ func (e *Engine) CreateUser(ctx context.Context, rec store.UserRecord) error {
 		if users.Get([]byte(rec.Name)) != nil {
 			return fmt.Errorf("%w: %s", store.ErrUserExists, rec.Name)
 		}
+		if err := setUserEmail(tx, rec.Name, "", rec.Email); err != nil {
+			return err
+		}
 		return putJSON(users, rec.Name, rec)
 	})
+}
+
+// setUserEmail moves name's entry in the email index from old to new
+// (either may be empty). ErrEmailTaken if new belongs to someone else.
+func setUserEmail(tx *bbolt.Tx, name, old, new string) error {
+	if old == new {
+		return nil
+	}
+	idx := tx.Bucket(bktUserEmail)
+	if new != "" {
+		if owner := idx.Get([]byte(new)); owner != nil && string(owner) != name {
+			return store.ErrEmailTaken // no address in the error: it may be logged
+		}
+		if err := idx.Put([]byte(new), []byte(name)); err != nil {
+			return err
+		}
+	}
+	if old != "" {
+		if owner := idx.Get([]byte(old)); string(owner) == name {
+			return idx.Delete([]byte(old))
+		}
+	}
+	return nil
+}
+
+// UserByEmail implements store.Users.
+func (e *Engine) UserByEmail(ctx context.Context, email string) (store.UserRecord, error) {
+	var rec store.UserRecord
+	err := e.db.View(func(tx *bbolt.Tx) error {
+		name := tx.Bucket(bktUserEmail).Get([]byte(email))
+		if name == nil {
+			return store.ErrNoSuchUser
+		}
+		var err error
+		rec, err = getUser(tx, string(name))
+		return err
+	})
+	return rec, err
 }
 
 // GetUser implements store.Users.
@@ -90,10 +134,14 @@ func (e *Engine) UpdateUser(ctx context.Context, name string, change func(*store
 		if rec, err = getUser(tx, name); err != nil {
 			return err
 		}
+		oldEmail := rec.Email
 		if err := change(&rec); err != nil {
 			return err
 		}
 		rec.Name = name // the name is the key; it can't change here
+		if err := setUserEmail(tx, name, oldEmail, rec.Email); err != nil {
+			return err
+		}
 		if err := putJSON(tx.Bucket(bktUsers), name, rec); err != nil {
 			return err
 		}
@@ -108,8 +156,12 @@ func (e *Engine) UpdateUser(ctx context.Context, name string, change func(*store
 // DeleteUser implements store.Users.
 func (e *Engine) DeleteUser(ctx context.Context, name string) error {
 	return e.db.Update(func(tx *bbolt.Tx) error {
-		if tx.Bucket(bktUsers).Get([]byte(name)) == nil {
-			return fmt.Errorf("%w: %s", store.ErrNoSuchUser, name)
+		user, err := getUser(tx, name)
+		if err != nil {
+			return err
+		}
+		if err := setUserEmail(tx, name, user.Email, ""); err != nil {
+			return err
 		}
 		if _, err := deleteSessions(tx, func(s store.SessionRecord) bool { return s.User == name }); err != nil {
 			return err
@@ -231,4 +283,56 @@ func deleteSessions(tx *bbolt.Tx, match func(store.SessionRecord) bool) (int, er
 		}
 	}
 	return len(doomed), nil
+}
+
+// indexUserEmails (data format 5 -> 6) creates the email index and fills
+// it from the user records. Format-5 users have no email, so this
+// normally only creates the bucket.
+func indexUserEmails(tx *bbolt.Tx) error {
+	if _, err := tx.CreateBucketIfNotExists(bktUserEmail); err != nil {
+		return err
+	}
+	users, err := tx.CreateBucketIfNotExists(bktUsers)
+	if err != nil {
+		return err
+	}
+	return users.ForEach(func(k, v []byte) error {
+		var rec store.UserRecord
+		if err := json.Unmarshal(v, &rec); err != nil {
+			return fmt.Errorf("decode user %s: %w", k, err)
+		}
+		return setUserEmail(tx, rec.Name, "", rec.Email)
+	})
+}
+
+// checkUserEmails compares the email index with the user records: each
+// user's email must point back to them, and every entry must belong to a
+// user with that email. Damage here could sign someone in as another user.
+func checkUserEmails(tx *bbolt.Tx) []string {
+	var problems []string
+	users, idx := tx.Bucket(bktUsers), tx.Bucket(bktUserEmail)
+	if users == nil || idx == nil {
+		return []string{"users or email index bucket is missing"}
+	}
+	users.ForEach(func(k, v []byte) error {
+		var rec store.UserRecord
+		if err := json.Unmarshal(v, &rec); err != nil {
+			problems = append(problems, fmt.Sprintf("user %s: unreadable record: %v", k, err))
+			return nil
+		}
+		if rec.Email != "" && string(idx.Get([]byte(rec.Email))) != rec.Name {
+			problems = append(problems, fmt.Sprintf("user %s: email is not in the email index", rec.Name))
+		}
+		return nil
+	})
+	idx.ForEach(func(email, name []byte) error {
+		var rec store.UserRecord
+		v := users.Get(name)
+		if v == nil || json.Unmarshal(v, &rec) != nil || rec.Email != string(email) {
+			// The address itself stays out of the report: it is personal data.
+			problems = append(problems, fmt.Sprintf("email index: an entry for user %s does not match that user", name))
+		}
+		return nil
+	})
+	return problems
 }

@@ -58,6 +58,8 @@ const (
 	CodeUserExists         = "UserAlreadyExists"
 	CodeInvalidPassword    = "InvalidPassword"
 	CodeInvalidUserName    = "InvalidUserName"
+	CodeInvalidEmail       = "InvalidEmail"
+	CodeEmailTaken         = "EmailTaken"
 	CodeNotSession         = "NotSignedInAsUser"
 	CodeCommitUncertain    = "CommitUncertain"
 )
@@ -108,9 +110,11 @@ var errorMapping = []struct {
 	{auth.ErrTooManyAttempts, http.StatusTooManyRequests, CodeTooManyAttempts},
 	{auth.ErrInvalidPassword, http.StatusBadRequest, CodeInvalidPassword},
 	{auth.ErrInvalidUserName, http.StatusBadRequest, CodeInvalidUserName},
+	{auth.ErrInvalidEmail, http.StatusBadRequest, CodeInvalidEmail},
 	{auth.ErrNotSession, http.StatusBadRequest, CodeNotSession},
 	{store.ErrNoSuchUser, http.StatusNotFound, CodeNoSuchUser},
 	{store.ErrUserExists, http.StatusConflict, CodeUserExists},
+	{store.ErrEmailTaken, http.StatusConflict, CodeEmailTaken},
 	{errAccessDenied, http.StatusForbidden, CodeAccessDenied},
 	{errBadRequest, http.StatusBadRequest, CodeInvalidRequest},
 	{context.Canceled, http.StatusBadRequest, CodeInvalidRequest},

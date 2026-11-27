@@ -18,6 +18,7 @@ import (
 
 type userJSON struct {
 	Name            string    `json:"name"`
+	Email           string    `json:"email,omitempty"`
 	Scopes          []string  `json:"scopes"`
 	Created         time.Time `json:"created"`
 	PasswordChanged time.Time `json:"passwordChanged"`
@@ -25,7 +26,7 @@ type userJSON struct {
 }
 
 func toUserJSON(u store.UserRecord) userJSON {
-	return userJSON{Name: u.Name, Scopes: u.Scopes, Created: u.Created, PasswordChanged: u.PasswordChanged, LastLogin: u.LastLogin}
+	return userJSON{Name: u.Name, Email: u.Email, Scopes: u.Scopes, Created: u.Created, PasswordChanged: u.PasswordChanged, LastLogin: u.LastLogin}
 }
 
 // failThrottled answers a TooManyAttemptsError with 429 and Retry-After.
@@ -50,14 +51,13 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 	}
 	token, sess, user, err := a.auth.Login(r.Context(), req.Username, req.Password, clientFrom(r).ip)
 	if err != nil {
-		// Name the account being tried, but only if it exists: people
-		// sometimes type their password into the name field, and that
-		// must not end up in the log.
+		// Name the account being tried, but only if it exists, and by its
+		// user name even when signing in by email: people sometimes type
+		// their password into the name field, and neither that nor an
+		// email address belongs in the log.
 		actor := "login:(unknown name)"
-		if name, nerr := auth.NormalizeUserName(req.Username); nerr == nil {
-			if _, uerr := a.auth.GetUser(r.Context(), name); uerr == nil {
-				actor = "login:" + name
-			}
+		if u, _, exists, _, lerr := a.auth.LookupLogin(r.Context(), req.Username); lerr == nil && exists {
+			actor = "login:" + u.Name
 		}
 		setActor(r, actor)
 		if !a.failThrottled(w, r, err) {
@@ -135,6 +135,7 @@ func (a *api) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Name     string   `json:"name"`
+		Email    string   `json:"email"`
 		Password string   `json:"password"`
 		Scopes   []string `json:"scopes"`
 	}
@@ -142,17 +143,19 @@ func (a *api) createUser(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	u, err := a.auth.CreateUser(r.Context(), req.Name, req.Password, req.Scopes)
+	u, err := a.auth.CreateUser(r.Context(), req.Name, req.Email, req.Password, req.Scopes)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	a.log.InfoContext(r.Context(), "user created", "request_id", RequestID(r.Context()), "user", u.Name, "scopes", u.Scopes)
+	// The email is not logged: it is personal data, and the name identifies the user.
+	a.log.InfoContext(r.Context(), "user created", "request_id", RequestID(r.Context()), "user", u.Name, "scopes", u.Scopes, "email", u.Email != "")
 	writeJSON(w, http.StatusCreated, toUserJSON(u))
 }
 
-// updateUser sets a new password (ending all the user's sessions) and/or
-// new scopes (applied to open sessions at once).
+// updateUser sets a new password (ending all the user's sessions), new
+// scopes (applied to open sessions at once) and/or a new email ("" removes
+// it).
 func (a *api) updateUser(w http.ResponseWriter, r *http.Request) {
 	p, ok := a.authorize(w, r, serverWide, auth.PermAdmin)
 	if !ok {
@@ -162,21 +165,51 @@ func (a *api) updateUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Password *string   `json:"password"`
 		Scopes   *[]string `json:"scopes"`
+		Email    *string   `json:"email"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	if req.Password == nil && req.Scopes == nil {
-		a.fail(w, r, badRequest(`nothing to change: send {"password": "..."} and/or {"scopes": [...]}`))
+	if req.Password == nil && req.Scopes == nil && req.Email == nil {
+		a.fail(w, r, badRequest(`nothing to change: send {"password": "..."}, {"scopes": [...]} and/or {"email": "..."}`))
 		return
 	}
-	// Check both before changing either, so a bad request changes nothing.
+	// Check everything before changing anything, so a bad request changes
+	// nothing.
+	cur, err := a.auth.GetUser(r.Context(), name)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	email := cur.Email
+	if req.Email != nil {
+		email = strings.TrimSpace(*req.Email)
+		if email != "" {
+			if email, err = auth.NormalizeEmail(email); err != nil {
+				a.fail(w, r, err)
+				return
+			}
+		}
+	}
 	if req.Password != nil {
-		if err := auth.CheckPassword(name, *req.Password); err != nil {
+		if err := auth.CheckPassword(name, email, *req.Password); err != nil {
 			a.fail(w, r, err)
 			return
 		}
+	}
+	if req.Scopes != nil {
+		if err := auth.CheckScopes(*req.Scopes); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+	}
+	if req.Email != nil {
+		if _, err := a.auth.SetUserEmail(r.Context(), name, email); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		a.log.InfoContext(r.Context(), "user email changed", "request_id", RequestID(r.Context()), "user", name, "email", email != "")
 	}
 	if req.Scopes != nil {
 		if _, err := a.auth.SetUserScopes(r.Context(), name, *req.Scopes); err != nil {

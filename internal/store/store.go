@@ -277,15 +277,20 @@ type Keys interface {
 // Users stores people who sign in with a name and password, and their
 // sessions. Passwords and session tokens are stored only as hashes.
 type Users interface {
-	// CreateUser returns ErrUserExists if the name is taken.
+	// CreateUser returns ErrUserExists if the name is taken, ErrEmailTaken
+	// if rec.Email is another user's.
 	CreateUser(ctx context.Context, rec UserRecord) error
 	// GetUser returns ErrNoSuchUser if name is unknown.
 	GetUser(ctx context.Context, name string) (UserRecord, error)
+	// UserByEmail returns the user with this (normalized) email, or
+	// ErrNoSuchUser.
+	UserByEmail(ctx context.Context, email string) (UserRecord, error)
 	// ListUsers returns all users, oldest first.
 	ListUsers(ctx context.Context) ([]UserRecord, error)
 	// UpdateUser changes a user in one transaction. When revokeSessions is
 	// true it also deletes the user's sessions, except the one whose hash
-	// is keepSession (may be empty), in the same transaction.
+	// is keepSession (may be empty), in the same transaction. A changed
+	// Email must not be another user's (ErrEmailTaken).
 	UpdateUser(ctx context.Context, name string, change func(*UserRecord) error, revokeSessions bool, keepSession string) (UserRecord, error)
 	// DeleteUser deletes the user and all their sessions.
 	DeleteUser(ctx context.Context, name string) error
@@ -309,7 +314,10 @@ type Users interface {
 
 // UserRecord is a stored user.
 type UserRecord struct {
-	Name   string   `json:"name"`
+	Name string `json:"name"`
+	// Email is optional, normalized (lowercase), unique among users and
+	// may change; Name is the fixed identity. Nothing is sent to it yet.
+	Email  string   `json:"email,omitempty"`
 	Scopes []string `json:"scopes"`
 	// PasswordHash is "pbkdf2-sha256$<iterations>$<salt b64>$<hash b64>".
 	PasswordHash    string    `json:"passwordHash"`
@@ -444,6 +452,7 @@ var (
 	ErrInvalidQuota  = errors.New("invalid quota")
 	ErrNoSuchUser    = errors.New("no such user")
 	ErrUserExists    = errors.New("user already exists")
+	ErrEmailTaken    = errors.New("another user has this email")
 	ErrNoSuchSession = errors.New("no such session")
 	// ErrUserChanged: the user's password changed (or the user was made
 	// again) while a sign-in was checking the old one.

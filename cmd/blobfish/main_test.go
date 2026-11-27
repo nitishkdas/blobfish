@@ -285,7 +285,7 @@ func TestResetPasswordCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := auth.NewService(eng, eng.PresignSecret()).UseUsers(eng).UseCheapPasswordHashForTests()
-	if _, err := svc.CreateUser(ctx, "maya", "forgotten password", []string{"*:admin"}); err != nil {
+	if _, err := svc.CreateUser(ctx, "maya", "", "forgotten password", []string{"*:admin"}); err != nil {
 		t.Fatal(err)
 	}
 	old, _, _, err := svc.Login(ctx, "maya", "forgotten password", "1.1.1.1")
